@@ -18,9 +18,9 @@ Current demonstration modules include:
 - Virtual detector imaging
 - Diffraction pattern rotation estimation
 - Center-of-Mass (CoM) and integrated CoM (iCoM) analysis
-- Ptychographic reconstruction:
-  WDD and SSB methods
-  LSQML and ePIE methods (mixed-state and multi-slice implementations)
+- Ptychographic reconstruction:<br>
+    WDD and SSB methods<br>
+    LSQML and ePIE methods (mixed-state and multi-slice implementations)
 - Simple parallax reconstruction
 
 ## Installation
