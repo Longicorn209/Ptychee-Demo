@@ -1,5 +1,5 @@
 """
-Author: Zeyu Wang
+Author: Zeyu Wang & Xiaoyan Wu
 Date: September 2025
 Description: "iterative ptychogrphay"
 """
