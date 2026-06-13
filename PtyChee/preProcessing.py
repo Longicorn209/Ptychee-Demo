@@ -1,6 +1,5 @@
 """
 Author: Zeyu Wang
-Email: zywang209@gmail.com
 Date: September 2025
 Description: "4D-STEM data preprocessing tools"
 """
