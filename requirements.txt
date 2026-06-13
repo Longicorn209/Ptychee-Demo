@@ -1,0 +1,5 @@
+numpy==1.26.4
+scipy==1.16.0
+matplotlib==3.10.3
+tifffile==2023.9.26
+torch==2.1.1
