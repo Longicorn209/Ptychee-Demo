@@ -15,13 +15,13 @@ The code is provided as a compact demonstration package together with a sample d
 Current demonstration modules include:
 
 - 4D-STEM data preprocessing
-- Virtual detector imaging
 - Diffraction pattern rotation estimation
 - Center-of-Mass (CoM) and integrated CoM (iCoM) analysis
+- Virtual detector imaging
+- Simple parallax reconstruction (tcBF)
 - Ptychographic reconstruction:<br>
-    WDD and SSB methods<br>
-    LSQML and ePIE methods (mixed-state and multi-slice implementations)
-- Simple parallax reconstruction
+    analytical WDD and SSB methods<br>
+    iterative LSQML and ePIE methods (mixed-state and multi-slice implementations)
 
 ## Installation
 ```bash
