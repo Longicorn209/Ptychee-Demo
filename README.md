@@ -14,7 +14,7 @@ The code is provided as a compact demonstration package together with a sample d
 
 Current demonstration modules include:
 
-- 4D-STEM data processing
+- 4D-STEM data preprocessing
 - Virtual detector imaging
 - Diffraction pattern rotation estimation
 - Center-of-Mass (CoM) and integrated CoM (iCoM) analysis
