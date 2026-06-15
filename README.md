@@ -4,7 +4,7 @@ Authors:
 - Zeyu Wang
 - Xiaoyan Wu
 
-A lightweight demonstration toolbox for 4D-STEM data analysis and reconstruction.
+A lightweight demonstration toolbox for 4D-STEM data analysis and reconstruction, developed in Python and PyTorch.
 
 This repository contains a collection of reconstruction and visualization routines for 4D-STEM datasets, including ptychographic reconstruction and other diffraction-based imaging methods.
 
