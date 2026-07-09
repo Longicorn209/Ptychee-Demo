@@ -65,7 +65,7 @@ Before running the demo, please unzip the dataset.
 
 ## Citation
 
-If you use this repository in academic work, please cite the associated publication:
+If you use this repository in academic work, please cite the associated publications:
 
 https://doi.org/10.1038/s41586-025-09693-6
 
