@@ -67,7 +67,8 @@ Before running the demo, please unzip the dataset.
 
 If you use this repository in academic work, please cite the associated publication:
 
-DOI: https://doi.org/10.1038/s41586-025-09693-6
+https://doi.org/10.1038/s41586-025-09693-6
+https://doi.org/10.1021/jacs.5c03627
 
 ## License
 
