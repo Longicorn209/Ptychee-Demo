@@ -98,7 +98,7 @@ def tcBF(data_4D,
     total_time = time.time() - start_time
     print_and_log(f'tcBF process finished in {total_time} s')
 
-    shift_max = int(np.abs(outer_radius*alpha*defocus/scan_step+1))
+    shift_max = int(np.abs(outer_radius*alpha*defocus/scan_step)+1)
     intensity_min = np.min(Aligned_BF[shift_max:-shift_max,shift_max:-shift_max])
 
     return Aligned_BF, intensity_min
