@@ -73,11 +73,12 @@ def initialize_iterPtycho_probe(paCBED, reciprocalSpace_pixel_size, Voltage, def
 
     chi, k_theta = Chi_defocus(dy, dx, reciprocalSpace_pixel_size, Voltage, defocus)
 
-    Ronchi_norm = (paCBED - np.amin(paCBED)) / np.ptp(paCBED)
-    BFdisk = np.ones(Ronchi_norm.shape) * (Ronchi_norm > 0.5)
+    # Ronchi_norm = (paCBED - np.amin(paCBED)) / np.ptp(paCBED)
+    # BFdisk = np.ones(Ronchi_norm.shape) * (Ronchi_norm > 0.5)
+    # ApeFunc = BFdisk*np.exp(-1j*chi) * np.mean(np.sqrt(paCBED))
 
-    #ApeFunc = np.sqrt(paCBED)*np.exp(-1j*chi) #/np.mean(np.sqrt(paCBED))
-    ApeFunc = BFdisk*np.exp(-1j*chi)
+    ApeFunc = np.sqrt(paCBED)*np.exp(-1j*chi) #/ np.mean(np.sqrt(paCBED))
+    
     probe0 = np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(ApeFunc)))
 
     if show_probe0:
