@@ -609,15 +609,8 @@ def msLSQML_pc_engine(iter_max, s_O, s_P, s_PC,
 
 
 
-def msLSQML_pc_engine(iter_max, 
-                      s_O, 
-                      s_P, 
-                      s_PC,
-                      data_4D, 
-                      posset, 
-                      proben0, 
-                      objectn, 
-                      propagators, 
+def msLSQML_pc_engine(iter_max, s_O, s_P, s_PC,
+                      data_4D, posset, proben0, objectn, propagators, 
                       n_block=None, 
                       position_clustering=False, 
                       pc_start_iteration=None,
