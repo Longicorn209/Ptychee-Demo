@@ -344,237 +344,8 @@ def FFT_phase0_offset(object_GPU, n_slice, FFT_phase_offset=0):
 
 
 
+
 '''
-def msLSQML_engine(iter_max, s_O, s_P,
-                data_4D, posset, proben0, objectn, propagators,
-                n_block = None, 
-                e_f = 1e-9,
-                e_g = 1e-1,
-                e_LSQ = 5e-1,
-                #save_gap = None,
-                position_shuffle = True,
-                probe_orthog_constr = False,
-                sorting_probe = True,
-                POA = False, 
-                ks_softThreshold = 0,
-                kh_hardThreshold = 0,
-                kz_regularization = 0,
-                rh_positive_phase = False,
-                FFT_phase_offset = 0,
-                ):
-    
-    #if save_gap is None:
-    #    save_gap = iter_max
-
-    sy, sx, dy, dx = data_4D.shape
-    n_state = proben0.shape[0]
-    n_slice = objectn.shape[0]
-
-    if n_block is None:
-        n_block = sy
-
-    print_and_log('')
-    print_and_log(f'############## msLSQML Iteration Parameters ##############')
-    print_and_log(f"Device Using: {device}")
-    print_and_log(f'Number of Iterations: {iter_max}')
-    #print_and_log(f'Save Gap: {save_gap}', logfile)
-    print_and_log(f'Step for Updating Object: {s_O}')
-    print_and_log(f'Step for Updating Probe: {s_P}')
-    print_and_log(f'Number of Blocks: {n_block}')
-    print_and_log(f'Block Size: {int(sy*sx/n_block)}')
-    print_and_log(f'Epsilon for Recipro Optim: {e_f}')
-    print_and_log(f'Epsilon for Real Optim: {e_g}')
-    print_and_log(f'Epsilon for LSQ: {e_LSQ}')
-    print_and_log(f'Scanning Position Shuffle: {position_shuffle}')
-    print_and_log(f'Probe Orthog Constraint: {probe_orthog_constr}')
-    print_and_log(f'Sorting Probe by Energy: {sorting_probe}')
-    print_and_log(f'Phase Object Approximation: {POA}')
-    print_and_log(f'Object Positive Phase: {rh_positive_phase}')
-    print_and_log(f'Object SoftThreshold: {ks_softThreshold}')
-    print_and_log(f'Object HardThreshold: {kh_hardThreshold}')
-    print_and_log(f'Object kz Regularization: {kz_regularization}')
-    print_and_log(f'Object FFT phase offset: {FFT_phase_offset}')
-
-    data_4D[data_4D<0] = 0
-    data_4D_sqrt_GPU = torch.from_numpy(np.reshape(np.sqrt(data_4D), (sy*sx,dy,dx))).to(device)
-    proben_GPU = torch.from_numpy(proben0).to(device).to(dtype=torch.complex64)
-    object_GPU = torch.from_numpy(objectn).to(device).to(dtype=torch.complex64)
-    posset_GPU = torch.from_numpy(posset).to(device)
-    propagators_GPU = torch.from_numpy(propagators).to(device).to(dtype=torch.complex64)
-
-    _, Oy, Ox = object_GPU.shape
-    y_ind = torch.arange(dy,device=device,dtype=torch.int32)
-    x_ind = torch.arange(dx,device=device,dtype=torch.int32)
-
-    #object_siries = torch.zeros((int(iter_max/save_gap), object_GPU.shape), dtype=torch.complex64, device=device)
-    #probe_siries = torch.zeros((int(iter_max/save_gap), proben_GPU.shape),dtype=torch.complex64, device=device)
-    err = torch.zeros(iter_max, device=device)
-    Prb_LSQ_step = torch.zeros((iter_max,n_state), device=device)
-    Obj_LSQ_step = torch.zeros((iter_max,n_slice), device=device)
-  
-    qy = fftfreq(Oy, device=device)
-    qx = fftfreq(Ox, device=device)
-    qz = fftfreq(n_slice, device=device)
-    qza, qya, qxa = torch.meshgrid(qz, qy, qx, indexing="ij")
-    qz2 = (qza*kz_regularization)**2
-    qr2 = qxa**2+qya**2
-    Wz = 1 - 2/torch.pi*torch.arctan2(qz2, qr2)
-
-    start_time = time.time()
-    print_and_log('')
-    print_and_log(f'#################### msLSQML Process #####################')
-    print("\rLSQ-3ML progressing: {:^3.0f}%[{}->{}] ?iter/s ({:0>2}:{:0>2}:{:0>2}<??:??:??)".format(0,"*"*0,"."*10,0,0,0),end = "")
-    
-    for i in range(iter_max):
-        time_i0 = time.time()
-
-        err_u = 0
-        err_d = 0
-        
-        if position_shuffle:
-            idx = torch.randperm(posset_GPU.shape[0], device=device)
-            posset_GPU = posset_GPU[idx]
-
-        b_size = int(sy*sx/n_block)
-        possetn_GPU = posset_GPU.reshape((n_block,int(sy*sx/n_block),5))
-        poss_1D = possetn_GPU[:,:,4].to(dtype=torch.int64)
-
-        if probe_orthog_constr:
-            proben_GPU = probe_orthogonalization(proben_GPU, n_state)
-
-        if sorting_probe:
-            intensities = proben_GPU.abs().pow(2).sum(dim=(-2, -1))
-            intensities_order = torch.argsort(intensities, descending=True)
-            proben_GPU = proben_GPU[intensities_order]
-
-        if i == 0 or (i+1)%10 == 0:
-            gObj_d = torch.zeros((Oy,Ox), dtype=torch.complex64, device=device)
-            for ii in range(n_block):
-                ind_y = (possetn_GPU[ii,:,2][:,None,None]+y_ind[None,:,None]).to(dtype=torch.int32)
-                ind_x = (possetn_GPU[ii,:,3][:,None,None]+x_ind[None,None,:]).to(dtype=torch.int32)
-                indice = ind_y*Ox + ind_x
-
-                proben_i = proben_GPU[0].abs().pow(2).unsqueeze(0).expand(b_size,dy,dx).to(torch.complex64)
-                gObj_d = gObj_d.ravel().index_add_(0,indice.ravel(),proben_i.ravel()).reshape((Oy,Ox))
-
-
-        for ii in range(n_block):
-            ind_y = (possetn_GPU[ii,:,2][:,None,None]+y_ind[None,:,None]).to(dtype=torch.int32).long()
-            ind_x = (possetn_GPU[ii,:,3][:,None,None]+x_ind[None,None,:]).to(dtype=torch.int32).long()
-            indice = ind_y*Ox + ind_x
-
-            Illuminated_patches = object_GPU[:,ind_y,ind_x]
-            amplitudes_patches = data_4D_sqrt_GPU[poss_1D[ii]]
-
-            Prb_ms = []
-            Prb_ms.append(proben_GPU.unsqueeze(1))
-            for s in range(n_slice):
-                psi = Prb_ms[s]*Illuminated_patches[s].unsqueeze(0)
-                if s != n_slice-1:
-                    psifft = fft2(psi, dim=(2,3))
-                    psifft *= propagators_GPU[None,None,:,:]
-                    Prb_ms.append(ifft2(psifft, dim=(2,3)))
-
-            psi_fft = fftshift(fft2(psi, dim=(2,3)), dim=(2,3))
-            a_psi_fft = psi_fft.abs().pow(2).sum(dim=0).sqrt()
-            chi_fft_R = amplitudes_patches/(a_psi_fft+e_f) - 1
-            chi_fft = psi_fft*chi_fft_R.unsqueeze(0).to(torch.complex64)
-            chi = ifft2(ifftshift(chi_fft, dim=(2,3)), dim=(2,3))
-            
-            for sr in range(n_slice-1,-1,-1):
-                if sr != n_slice-1:
-                    chi_fft = fft2(chi, dim=(2,3))
-                    chi_fft /= propagators_GPU[None,None,:,:]
-                    chi = ifft2(chi_fft, dim=(2,3))
-
-                gPrb_i = chi*Illuminated_patches[sr].unsqueeze(0).conj()
-                gPrb_u = gPrb_i.sum(dim=1)
-                gPrb_d = Illuminated_patches[sr].abs().pow(2).sum(dim=0).unsqueeze(0)
-                gPrb = gPrb_u/(gPrb_d+e_g*gPrb_d.max())
-
-                gObj_i = chi[0]*Prb_ms[sr][0].conj()
-                gObj_u = torch.zeros((Oy,Ox), dtype=torch.complex64, device=device)
-                gObj_u = gObj_u.ravel().index_add_(0,indice.ravel(),gObj_i.ravel()).reshape((Oy,Ox))
-                gObj = gObj_u/(gObj_d**2+(e_g*gObj_d.abs().max())**2).sqrt()
-
-                gObj_patches = gObj[ind_y,ind_x]
-                gOP = gObj_patches*Prb_ms[sr].sum(dim=0)
-                Mr_0 = (gOP.conj()*chi.sum(dim=0)).real.sum(dim=(1,2))
-                Ml_00 = gOP.abs().pow(2).sum(dim=(1,2))
-                Ml_00 += e_LSQ*Ml_00.mean()
-                a_O = (Mr_0/Ml_00*s_O).mean()/n_slice
-                Obj_LSQ_step[i][sr] += a_O/n_block
-                object_GPU[sr] += a_O*gObj
-
-                if sr == 0:
-                    gPO = gPrb.unsqueeze(1)*Illuminated_patches[sr].unsqueeze(0)
-                    Mr_1 = (gPO.conj()*chi).real.sum(dim=(2,3))
-                    Ml_11 = gPO.abs().pow(2).sum(dim=(2,3))
-                    Ml_11 += e_LSQ*Ml_11.mean()
-                    a_P = (Mr_1/Ml_11).mean(dim=1)*s_P
-                    Prb_LSQ_step[i] += a_P/n_block
-                    proben_GPU += a_P[:,None,None]*gPrb
-
-                chi = gPrb_i
-
-            err_u += (amplitudes_patches-(psi_fft.abs().pow(2).sum(dim=0)).sqrt()).pow(2).sum()
-            err_d += amplitudes_patches.to(torch.float32).pow(2).sum()
-        err[i] = err_u/err_d
-
-        if kz_regularization > 0:
-            object_GPU = kz_constraint(object_GPU, Wz)
-
-        if ks_softThreshold > 0:
-            object_GPU = ks_constraint(object_GPU, n_slice, ks_softThreshold)
-
-        if kh_hardThreshold > 0:
-            object_GPU = kh_constraint(object_GPU, n_slice, kh_hardThreshold)
-
-        if rh_positive_phase:
-            object_GPU = rh_constraint(object_GPU, n_slice, rh_hardThreshold=0)
-
-        if POA:
-            object_GPU = POA_constraint(object_GPU)
-
-        if FFT_phase_offset > 0 and i>iter_max*1/2:
-            object_GPU = FFT_phase0_offset(object_GPU, n_slice, FFT_phase_offset)
-
-        #if (i+1)%save_gap == 0:
-        #    object_siries[int((i+1)/save_gap-1)] = object_GPU
-        #    probe_siries[int((i+1)/save_gap-1)] = proben_GPU
-
-        time_is = time.time()-time_i0
-        speed = 1/time_is
-        process = (i+1)/iter_max*100
-        aa = "*" * int(process/10)
-        bb = "." * (10-int(process/10))
-        dur = int(time.time() - start_time)
-        time_remain = int((iter_max-i-1)*time_is)
-        dur_h = dur//3600
-        dur_m = (dur-dur_h*3600)//60
-        dur_s = dur-dur_h*3600-dur_m*60
-        time_remain_h = time_remain//3600
-        time_remain_m = (time_remain-time_remain_h*3600)//60
-        time_remain_s = time_remain-time_remain_h*3600-time_remain_m*60
-        print("\rLSQ-3ML progressing: {:^3.0f}%[{}->{}] {:.2f}iter/s ({:0>2}:{:0>2}:{:0>2}<{:0>2}:{:0>2}:{:0>2})".format(process,aa,bb,speed,dur_h,dur_m,dur_s,time_remain_h,time_remain_m,time_remain_s),end = "")
-    print('')
-    gpu_time = time.time() - start_time
-    
-    msLSQML_Obj = np.array(object_GPU.cpu())
-    msLSQML_Prb = np.array(proben_GPU.cpu())
-    msLSQML_err = np.array(err.cpu())
-    Obj_LSQ_step = np.array(Obj_LSQ_step.cpu())
-    Prb_LSQ_step = np.array(Prb_LSQ_step.cpu())
-
-    log_to_file("LSQ-3ML progressing: {:^3.0f}%[{}->{}] {:.2f}iter/s ({:0>2}:{:0>2}:{:0>2}<{:0>2}:{:0>2}:{:0>2})".format(process,aa,bb,speed,dur_h,dur_m,dur_s,time_remain_h,time_remain_m,time_remain_s))
-    print_and_log(f'LSQ-3ML process finished in {gpu_time} s')
-
-    return msLSQML_Obj, msLSQML_Prb, msLSQML_err, Obj_LSQ_step, Prb_LSQ_step
-#'''
-
-
-
-
 def msLSQML_pc_engine(iter_max, s_O, s_P, s_PC,
                 data_4D, posset, proben0, objectn, propagators,
                 n_block = None, 
@@ -833,7 +604,340 @@ def msLSQML_pc_engine(iter_max, s_O, s_P, s_PC,
     print_and_log(f'LSQ-3ML process finished in {gpu_time} s')
 
     return msLSQML_Obj, msLSQML_Prb, msLSQML_err, Obj_LSQ_step, Prb_LSQ_step, pc_mean_shift, posset
+#'''
 
+
+
+
+def msLSQML_pc_engine(iter_max, 
+                      s_O, 
+                      s_P, 
+                      s_PC,
+                      data_4D, 
+                      posset, 
+                      proben0, 
+                      objectn, 
+                      propagators, 
+                      n_block=None, 
+                      position_clustering=False, 
+                      pc_start_iteration=None,
+                      e_f=1e-9, 
+                      e_g=1e-1, 
+                      e_LSQ=5e-1,
+                      probe_orthog_constr=False, 
+                      sorting_probe=True, 
+                      POA=False, 
+                      ks_softThreshold=0, 
+                      kh_hardThreshold=0, 
+                      kz_regularization=0, 
+                      rh_positive_phase=False, 
+                      FFT_phase_offset=0,
+                      ):
+
+    sy, sx, dy, dx = data_4D.shape
+    n_state = proben0.shape[0]
+    n_slice = objectn.shape[0]
+    N_pos = sy * sx
+
+    if n_block is None:
+        n_block = sy
+
+    n_block = min(n_block, N_pos)
+
+    if pc_start_iteration is None:
+        pc_start_iteration = 0.25*iter_max
+
+    print_and_log('')
+    print_and_log(f'############## msLSQML Iteration Parameters ##############')
+    print_and_log(f"Device Using: {device}")
+    print_and_log(f'Number of Iterations: {iter_max}')
+    print_and_log(f'Step for Position Correction: {s_PC}')
+    print_and_log(f'Step for Updating Object: {s_O}')
+    print_and_log(f'Step for Updating Probe: {s_P}')
+    print_and_log(f'Number of Blocks: {n_block}')
+    print_and_log(f'Average Block Size: {N_pos / n_block:.2f} positions')
+    print_and_log(f'Spatial Position Clustering: {position_clustering}')
+    print_and_log(f'Epsilon for Recipro Optim: {e_f}')
+    print_and_log(f'Epsilon for Real Optim: {e_g}')
+    print_and_log(f'Epsilon for LSQ: {e_LSQ}')
+    print_and_log(f'Probe Orthog Constraint: {probe_orthog_constr}')
+    print_and_log(f'Sorting Probe by Energy: {sorting_probe}')
+    print_and_log(f'Phase Object Approximation: {POA}')
+    print_and_log(f'Object Positive Phase: {rh_positive_phase}')
+    print_and_log(f'Object SoftThreshold: {ks_softThreshold}')
+    print_and_log(f'Object HardThreshold: {kh_hardThreshold}')
+    print_and_log(f'Object kz Regularization: {kz_regularization}')
+    print_and_log(f'Object FFT phase offset: {FFT_phase_offset}')
+
+    data_4D[data_4D < 0] = 0
+    data_4D_sqrt_GPU = torch.from_numpy(np.reshape(np.sqrt(data_4D), (N_pos, dy, dx))).to(device)
+    proben_GPU = torch.from_numpy(proben0).to(device).to(dtype=torch.complex64)
+    object_GPU = torch.from_numpy(objectn).to(device).to(dtype=torch.complex64)
+    posset_GPU = torch.from_numpy(posset).to(device)
+    propagators_GPU = torch.from_numpy(propagators).to(device).to(dtype=torch.complex64)
+
+    _, Oy, Ox = object_GPU.shape
+    y_ind = torch.arange(dy, device=device, dtype=torch.int32)
+    x_ind = torch.arange(dx, device=device, dtype=torch.int32)
+
+    err = torch.zeros(iter_max, device=device)
+    Prb_LSQ_step = torch.zeros((iter_max, n_state), device=device)
+    Obj_LSQ_step = torch.zeros((iter_max, n_slice), device=device)
+    pc_mean_shift = torch.zeros(iter_max, device=device)
+
+    qmy, qmx = torch.meshgrid(fftfreq(dx, device=device), fftfreq(dy, device=device), indexing='ij')
+    qy = fftfreq(Oy, device=device)
+    qx = fftfreq(Ox, device=device)
+    qz = fftfreq(n_slice, device=device)
+    qza, qya, qxa = torch.meshgrid(qz, qy, qx, indexing="ij")
+    qz2 = (qza * kz_regularization) ** 2
+    qr2 = qxa ** 2 + qya ** 2
+    Wz = 1 - 2 / torch.pi * torch.arctan2(qz2, qr2)
+
+    if position_clustering:
+        time_0 = time.time()
+        
+        # # Morton order spatial cluster
+        # pos_y = posset_GPU[:, 2].to(torch.int64)
+        # pos_x = posset_GPU[:, 3].to(torch.int64)
+        # max_coord = max(pos_y.max().item(), pos_x.max().item())
+        # n_bits = max(1, int(max_coord).bit_length())
+        # morton_code = torch.zeros_like(pos_x)
+        # for bit in range(n_bits):
+        #     morton_code |= ((pos_x >> bit) & 1) << (2 * bit)
+        #     morton_code |= ((pos_y >> bit) & 1) << (2 * bit + 1)
+        # position_order = torch.argsort(morton_code)
+        # posset_sorted = posset_GPU[position_order]
+        # spatial_blocks = list(torch.tensor_split(posset_sorted, n_block, dim=0))
+
+        # K-mean clustering for scan positions
+        print('\rK-mean clustering for scan positions started, end=""')
+        pos_xy = posset_GPU[:, 2:4].to(torch.float32)
+        pos_min = pos_xy.min(dim=0).values
+        pos_max = pos_xy.max(dim=0).values
+        pos_scale = (pos_max - pos_min).clamp_min(1e-8)
+        pos_xy_scaled = (pos_xy - pos_min) / pos_scale
+        n_block_y = max(1, int(np.sqrt(n_block)))
+        n_block_x = int(np.ceil(n_block / n_block_y))
+        while n_block_y * n_block_x < n_block:
+            n_block_y += 1
+        y_centers = torch.linspace(0.5 / n_block_y, 1 - 0.5 / n_block_y, n_block_y, device=device)
+        x_centers = torch.linspace(0.5 / n_block_x, 1 - 0.5 / n_block_x, n_block_x, device=device)
+        cy, cx = torch.meshgrid(y_centers, x_centers, indexing='ij')
+        centroids = torch.stack((cy.flatten(), cx.flatten()), dim=1)[:n_block]
+        for _ in range(50):
+            dist = torch.cdist(pos_xy_scaled, centroids)
+            labels = torch.argmin(dist, dim=1)
+            counts = torch.bincount(labels, minlength=n_block)
+            empty = torch.where(counts == 0)[0]
+            if empty.numel() > 0:
+                largest = torch.argsort(counts, descending=True)
+                for empty_id, largest_id in zip(empty.tolist(), largest.tolist()):
+                    if counts[largest_id] > 1:
+                        candidate = torch.where(labels == largest_id)[0]
+                        farthest = candidate[torch.argmax(dist[candidate, largest_id])]
+                        centroids[empty_id] = pos_xy_scaled[farthest]
+                        labels[farthest] = empty_id
+                        counts[largest_id] -= 1
+                        counts[empty_id] += 1
+            new_centroids = torch.zeros_like(centroids)
+            new_centroids.index_add_(0, labels, pos_xy_scaled)
+            new_centroids = new_centroids / counts.clamp_min(1).to(torch.float32).unsqueeze(1)
+            if torch.allclose(centroids, new_centroids, atol=1e-5):
+                break
+            centroids = new_centroids
+        spatial_blocks = [posset_GPU[labels == k] for k in range(n_block) if torch.any(labels == k)]
+        print_and_log(f'K-mean clustering for scan positions finished in {time.time()-time_0} s')
+
+
+        # # plot scan positions clustering
+        # print('real n_block: '+str(len(spatial_blocks)))
+        # plt.figure(figsize=(8, 8))
+        # for cluster_id, block in enumerate(spatial_blocks):
+        #     block_cpu = block[:, 2:4].detach().cpu().numpy()
+        #     plt.scatter(block_cpu[:, 1], block_cpu[:, 0], s=3, label=f'Cluster {cluster_id}')
+        # plt.gca().invert_yaxis()
+        # plt.xlabel('X')
+        # plt.ylabel('Y')
+        # plt.title(f'Spatial Clustering: {n_block} Blocks')
+        # plt.tight_layout()
+        # plt.show()
+        
+
+
+    start_time = time.time()
+
+    print_and_log('')
+    print_and_log(f'#################### msLSQML Process #####################')
+    print("\rLSQ-3ML progressing: {:^3.0f}%[{}->{}] ?iter/s ({:0>2}:{:0>2}:{:0>2}<??:??:??)".format(0, "*" * 0, "." * 10, 0, 0, 0), end="")
+
+    for i in range(iter_max):
+        time_i0 = time.time()
+        err_u = 0
+        err_d = 0
+
+        if position_clustering:
+            block_order = torch.randperm(n_block, device=device)
+            posset_blocks = [spatial_blocks[j] for j in block_order.tolist()]
+
+        else:
+            idx = torch.randperm(posset_GPU.shape[0], device=device)
+            posset_shuffled = posset_GPU[idx]
+            posset_blocks = list(torch.tensor_split(posset_shuffled, n_block, dim=0))
+
+
+        if probe_orthog_constr:
+            proben_GPU = probe_orthogonalization(proben_GPU, n_state)
+
+        if sorting_probe:
+            intensities = proben_GPU.abs().pow(2).sum(dim=(-2, -1))
+            intensities_order = torch.argsort(intensities, descending=True)
+            proben_GPU = proben_GPU[intensities_order]
+
+        if i == 0 or (i + 1) % 10 == 0:
+            gObj_d = torch.zeros((Oy, Ox), dtype=torch.complex64, device=device)
+
+            for pos_block in posset_blocks:
+                b_size = pos_block.shape[0]
+                ind_y = (pos_block[:, 2][:, None, None] + y_ind[None, :, None]).to(dtype=torch.int32)#.long()
+                ind_x = (pos_block[:, 3][:, None, None] + x_ind[None, None, :]).to(dtype=torch.int32)#.long()
+                indice = ind_y * Ox + ind_x
+                proben_i = proben_GPU[0].abs().pow(2).unsqueeze(0).expand(b_size, dy, dx).to(torch.complex64)
+                gObj_d = gObj_d.ravel().index_add_(0, indice.ravel(), proben_i.ravel()).reshape((Oy, Ox))
+
+        for pos_block in posset_blocks:
+            b_size = pos_block.shape[0]
+            poss_1D = pos_block[:, 4].to(dtype=torch.int64)
+            ind_y = (pos_block[:, 2][:, None, None] + y_ind[None, :, None]).to(dtype=torch.int32)#.long()
+            ind_x = (pos_block[:, 3][:, None, None] + x_ind[None, None, :]).to(dtype=torch.int32)#.long()
+            indice = ind_y * Ox + ind_x
+            Illuminated_patches = object_GPU[:, ind_y, ind_x]
+            amplitudes_patches = data_4D_sqrt_GPU[poss_1D]
+
+            Prb_ms = []
+            Prb_ms.append(proben_GPU.unsqueeze(1))
+
+            for s in range(n_slice):
+                psi = Prb_ms[s] * Illuminated_patches[s].unsqueeze(0)
+
+                if s != n_slice - 1:
+                    psifft = fft2(psi, dim=(2, 3))
+                    psifft *= propagators_GPU[None, None, :, :]
+                    Prb_ms.append(ifft2(psifft, dim=(2, 3)))
+
+            psi_fft = fftshift(fft2(psi, dim=(2, 3)), dim=(2, 3))
+            a_psi_fft = psi_fft.abs().pow(2).sum(dim=0).sqrt()
+            chi_fft_R = amplitudes_patches / (a_psi_fft + e_f) - 1
+            chi_fft = psi_fft * chi_fft_R.unsqueeze(0).to(torch.complex64)
+            chi = ifft2(ifftshift(chi_fft, dim=(2, 3)), dim=(2, 3))
+
+            for sr in range(n_slice - 1, -1, -1):
+                if sr != n_slice - 1:
+                    chi_fft = fft2(chi, dim=(2, 3))
+                    chi_fft /= propagators_GPU[None, None, :, :]
+                    chi = ifft2(chi_fft, dim=(2, 3))
+
+                gPrb_i = chi * Illuminated_patches[sr].unsqueeze(0).conj()
+                gPrb_u = gPrb_i.sum(dim=1)
+                gPrb_d = Illuminated_patches[sr].abs().pow(2).sum(dim=0).unsqueeze(0)
+                gPrb = gPrb_u / (gPrb_d + e_g * gPrb_d.max())
+
+                gObj_i = chi[0] * Prb_ms[sr][0].conj()
+                gObj_u = torch.zeros((Oy, Ox), dtype=torch.complex64, device=device)
+                gObj_u = gObj_u.ravel().index_add_(0, indice.ravel(), gObj_i.ravel()).reshape((Oy, Ox))
+                gObj = gObj_u / (gObj_d ** 2 + (e_g * gObj_d.abs().max()) ** 2).sqrt()
+
+                gObj_patches = gObj[ind_y, ind_x]
+                gOP = gObj_patches * Prb_ms[sr].sum(dim=0)
+                Mr_0 = (gOP.conj() * chi.sum(dim=0)).real.sum(dim=(1, 2))
+                Ml_00 = gOP.abs().pow(2).sum(dim=(1, 2))
+                Ml_00 += e_LSQ * Ml_00.mean()
+                a_O = (Mr_0 / Ml_00 * s_O).mean() / n_slice
+                Obj_LSQ_step[i][sr] += a_O / n_block
+                object_GPU[sr] += a_O * gObj
+
+                if sr == 0:
+                    gPO = gPrb.unsqueeze(1) * Illuminated_patches[sr].unsqueeze(0)
+                    Mr_1 = (gPO.conj() * chi).real.sum(dim=(2, 3))
+                    Ml_11 = gPO.abs().pow(2).sum(dim=(2, 3))
+                    Ml_11 += e_LSQ * Ml_11.mean()
+                    a_P = (Mr_1 / Ml_11).mean(dim=1) * s_P
+                    Prb_LSQ_step[i] += a_P / n_block
+                    proben_GPU += a_P[:, None, None] * gPrb
+
+                chi = gPrb_i
+
+                if i >= pc_start_iteration and sr == n_slice // 2 and s_PC:
+                    I_patches_fft = fft2(Illuminated_patches[sr], dim=(1, 2))
+                    I_patches_gx = ifft2(2j * torch.pi * I_patches_fft * qmx[None, :, :], dim=(1, 2))
+                    I_patches_gy = ifft2(2j * torch.pi * I_patches_fft * qmy[None, :, :], dim=(1, 2))
+                    gxP = I_patches_gx * Prb_ms[sr][0]
+                    Mr_x = (gxP.conj() * chi[0]).real.sum(dim=(1, 2))
+                    Ml_x = gxP.abs().pow(2).sum(dim=(1, 2))
+                    gx = s_PC * (Mr_x / Ml_x).real
+                    gyP = I_patches_gy * Prb_ms[sr][0]
+                    Mr_y = (gyP.conj() * chi[0]).real.sum(dim=(1, 2))
+                    Ml_y = gyP.abs().pow(2).sum(dim=(1, 2))
+                    gy = s_PC * (Mr_y / Ml_y).real
+                    pos_block[:, 2] += gy
+                    pos_block[:, 3] += gx
+                    pc_mean_shift[i] += (gy ** 2 + gx ** 2).sqrt().mean()
+
+            err_u += (amplitudes_patches - (psi_fft.abs().pow(2).sum(dim=0)).sqrt()).pow(2).sum()
+            err_d += amplitudes_patches.to(torch.float32).pow(2).sum()
+
+        err[i] = err_u / err_d
+        posset_GPU = torch.cat(posset_blocks, dim=0)
+
+        if kz_regularization > 0:
+            object_GPU = kz_constraint(object_GPU, Wz)
+
+        if ks_softThreshold > 0:
+            object_GPU = ks_constraint(object_GPU, n_slice, ks_softThreshold)
+
+        if kh_hardThreshold > 0:
+            object_GPU = kh_constraint(object_GPU, n_slice, kh_hardThreshold)
+
+        if rh_positive_phase:
+            object_GPU = rh_constraint(object_GPU, n_slice, rh_hardThreshold=0)
+
+        if POA:
+            object_GPU = POA_constraint(object_GPU)
+
+        if FFT_phase_offset > 0 and i > iter_max * 2 / 3:
+            object_GPU = FFT_phase0_offset(object_GPU, n_slice, FFT_phase_offset)
+
+        time_is = time.time() - time_i0
+        speed = 1 / time_is
+        process = (i + 1) / iter_max * 100
+        aa = "*" * int(process / 10)
+        bb = "." * (10 - int(process / 10))
+        dur = int(time.time() - start_time)
+        time_remain = int((iter_max - i - 1) * time_is)
+        dur_h = dur // 3600
+        dur_m = (dur - dur_h * 3600) // 60
+        dur_s = dur - dur_h * 3600 - dur_m * 60
+        time_remain_h = time_remain // 3600
+        time_remain_m = (time_remain - time_remain_h * 3600) // 60
+        time_remain_s = time_remain - time_remain_h * 3600 - time_remain_m * 60
+
+        print("\rLSQ-3ML progressing: {:^3.0f}%[{}->{}] {:.2f}iter/s ({:0>2}:{:0>2}:{:0>2}<{:0>2}:{:0>2}:{:0>2})".format(process, aa, bb, speed, dur_h, dur_m, dur_s, time_remain_h, time_remain_m, time_remain_s), end="")
+
+    print('')
+    gpu_time = time.time() - start_time
+
+    msLSQML_Obj = np.array(object_GPU.cpu())
+    msLSQML_Prb = np.array(proben_GPU.cpu())
+    msLSQML_err = np.array(err.cpu())
+    Obj_LSQ_step = np.array(Obj_LSQ_step.cpu())
+    Prb_LSQ_step = np.array(Prb_LSQ_step.cpu())
+    pc_mean_shift = np.array(pc_mean_shift.cpu())
+    posset = np.array(posset_GPU.cpu())
+
+    log_to_file("LSQ-3ML progressing: {:^3.0f}%[{}->{}] {:.2f}iter/s ({:0>2}:{:0>2}:{:0>2}<{:0>2}:{:0>2}:{:0>2})".format(process, aa, bb, speed, dur_h, dur_m, dur_s, time_remain_h, time_remain_m, time_remain_s))
+    print_and_log(f'LSQ-3ML process finished in {gpu_time} s')
+
+    return msLSQML_Obj, msLSQML_Prb, msLSQML_err, Obj_LSQ_step, Prb_LSQ_step, pc_mean_shift, posset
 
 
 

@@ -99,8 +99,6 @@ def run_iCoM(file, data_4D, scan_rotation_angle, scan_flip,
     iCoM_plot(iCoM, loss, save_results = save_results)
     dCoM_plot(dCoM, save_results = save_results)
 
-    
-
 
 
 
@@ -113,12 +111,13 @@ def run_msLSQML(file, data_4D, Voltage, alpha, scan_step, scan_rotation_angle, s
         s_O,                                     # step size for updating Object Function
         s_P,                                     # step size for updating Probe Function
         n_block = None,                          # block number：The CBEDs are divided into n_block blocks for batch computing, must be divisible by the number of scanning positions
+        position_clustering = False,              # positiosn clustering or not in one block
+        pc_start_iteration = None,
         BF_threshold = 0.5,                      # for calclulating aperture radius
         forced_aperture_radius = None,           # pixels, force the aperture radius to the given value, set to None if not needed
         e_f = 1e-9,                              # epsilon for reciprocal space updating
         e_g = 1e-1,                              # epsilin for real space updating
         e_LSQ = 5e-1,                            # eplison for LSQ step calculation
-        position_shuffle = True,                 # shuffle the order of the scanning positions, can effectively suppress some periodic artifacts
         probe_orthog_constr = False,             # orthogonal constraint for mix-state probes
         sorting_probe = True,                    # then the probes are sorted by their energies
         POA = False,                             # phase object approximation constraint 
@@ -164,10 +163,11 @@ def run_msLSQML(file, data_4D, Voltage, alpha, scan_step, scan_rotation_angle, s
     msLSQML_results = msLSQML_pc_engine(iter_max, s_O, s_P, S_position_correction,
                 data_4D, posset, proben0, objectn, propagators,
                 n_block = n_block, 
+                position_clustering = position_clustering,
+                pc_start_iteration = pc_start_iteration,
                 e_f = e_f,
                 e_g = e_g,
                 e_LSQ = e_LSQ,
-                position_shuffle = position_shuffle,
                 probe_orthog_constr = probe_orthog_constr,
                 sorting_probe = sorting_probe ,
                 POA = POA, 
@@ -192,36 +192,7 @@ def run_msLSQML(file, data_4D, Voltage, alpha, scan_step, scan_rotation_angle, s
     if S_position_correction:
         position_correction_plot(pc_mean_shift, posset_pc, posset)
 
-    '''
-    msLSQML_results = msLSQML_engine(iter_max, s_O, s_P, 
-                data_4D, posset, proben0, objectn, propagators,
-                n_block = n_block, 
-                e_f = e_f,
-                e_g = e_g,
-                e_LSQ = e_LSQ,
-                position_shuffle = position_shuffle,
-                probe_orthog_constr = probe_orthog_constr,
-                sorting_probe = sorting_probe ,
-                POA = POA, 
-                ks_softThreshold = ks_softThreshold,
-                kh_hardThreshold = kh_hardThreshold,
-                kz_regularization = kz_regularization,
-                rh_positive_phase = rh_positive_phase,
-    )
-    msLSQML_Obj, msLSQML_Prb, msLSQML_err, Obj_LSQ_step, Prb_LSQ_step = msLSQML_results
-
-    print_and_log('')
-    print_and_log(f'################### Saving and Ploting ###################')
-    if plot_and_save_err:    
-        iterPtycho_error_plot(msLSQML_err, save_results=save_results)
-    if plot_and_save_LSQ_step:
-        iterPtycho_LSQ_step_plot(Obj_LSQ_step, Prb_LSQ_step, save_results=save_results)
-    if plot_and_save_object:
-        iterPtycho_objFunc_plot(msLSQML_Obj, scan_rotation_angle, scan_flip, ptycho_move, data_shape, slice_thickness, save_results=save_results)
-    if plot_and_save_probe:
-        iterPtycho_proben_plot(msLSQML_Prb, proben0, scan_rotation_angle, scan_flip, data_shape, show_probe_comparison=show_probe_comparison, show_proben_Phase=show_proben_Phase, save_results=save_results)
-    #'''
-
+ 
 
 
 def run_msePIE(file, data_4D, Voltage, alpha, scan_step, scan_rotation_angle, scan_flip,
