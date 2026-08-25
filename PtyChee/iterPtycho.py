@@ -743,7 +743,6 @@ def msLSQML_pc_engine(iter_max, s_O, s_P, s_PC,
         spatial_blocks = [posset_GPU[labels == k] for k in range(n_block) if torch.any(labels == k)]
         print_and_log(f'\rK-mean clustering for scan positions finished in {time.time()-time_0:.2f} s')
 
-
         # # plot scan positions clustering
         # print('real n_block: '+str(len(spatial_blocks)))
         # plt.figure(figsize=(8, 8))
@@ -756,7 +755,6 @@ def msLSQML_pc_engine(iter_max, s_O, s_P, s_PC,
         # plt.title(f'Spatial Clustering: {n_block} Blocks')
         # plt.tight_layout()
         # plt.show()
-        
 
 
     start_time = time.time()
