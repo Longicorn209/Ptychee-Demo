@@ -62,7 +62,7 @@ def curl_curve(
         else:
             bast_angle_2 = bast_angle_1 - 180
         print_and_log(f'Best Scan Rotate Angle: {bast_angle_1} or {bast_angle_2} degrees')
-        print_and_log('No Need to Flip')
+        print_and_log('No Flipping Required')
     else:
         bast_angle_1 = - test_angle_range[ind_flip_min]
         if bast_angle_1 <= 0:
@@ -70,16 +70,7 @@ def curl_curve(
         else:
             bast_angle_2 = bast_angle_1 - 180
         print_and_log(f'Best Scan Rotate Angle: {bast_angle_1} or {bast_angle_2} degrees')
-        print_and_log('And Do Flip!')
-
-    '''
-    if mean_curl[ind_min] <= mean_curl_flip[ind_flip_min]:
-        print_and_log('Best CoM Rotate Angle: {test_angle_range[ind_min]} degrees')
-        print_and_log('No Need to Flip')
-    else:
-        print_and_log('Best CoM Rotate Angle: {test_angle_range[ind_flip_min]} degrees')
-        print_and_log('And Do Flip!')
-    #'''
+        print_and_log('Flipping Required !')
 
     return test_angle_range, mean_curl, mean_curl_flip
 
