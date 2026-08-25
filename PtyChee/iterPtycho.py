@@ -704,7 +704,8 @@ def msLSQML_pc_engine(iter_max, s_O, s_P, s_PC,
         # spatial_blocks = list(torch.tensor_split(posset_sorted, n_block, dim=0))
 
         # K-mean clustering for scan positions
-        print('\rK-mean clustering for scan positions started, end=""')
+        print_and_log('')
+        print('\rK-mean clustering for scan positions started', end="")
         pos_xy = posset_GPU[:, 2:4].to(torch.float32)
         pos_min = pos_xy.min(dim=0).values
         pos_max = pos_xy.max(dim=0).values
@@ -740,7 +741,7 @@ def msLSQML_pc_engine(iter_max, s_O, s_P, s_PC,
                 break
             centroids = new_centroids
         spatial_blocks = [posset_GPU[labels == k] for k in range(n_block) if torch.any(labels == k)]
-        print_and_log(f'K-mean clustering for scan positions finished in {time.time()-time_0} s')
+        print_and_log(f'\rK-mean clustering for scan positions finished in {time.time()-time_0:.2f} s')
 
 
         # # plot scan positions clustering
