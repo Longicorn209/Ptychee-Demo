@@ -38,8 +38,8 @@ pip install -r requirements.txt
 - PyTorch           2.1.1
 - NumPy             1.26.4
 - Matplotlib        3.10.3
-- tifffile          2023.9.26
-- scikit-image      0.22.0
+- Tifffile          2023.9.26
+- Scikit-Image      0.22.0
 
 ## Quick Start
 
