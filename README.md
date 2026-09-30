@@ -33,12 +33,12 @@ pip install -r requirements.txt
 ```
 
 ## Tested Environment
-- Python 3.11
-- CUDA 12.4
-- PyTorch 2.1.1
-- NumPy 1.26.4
-- SciPy 1.16.0
-- Matplotlib 3.10.3
+- Python            3.11
+- CUDA              12.4
+- PyTorch           2.1.1
+- NumPy             1.26.4
+- Matplotlib        3.10.3
+- scikit-image      0.22.0
 
 ## Quick Start
 
