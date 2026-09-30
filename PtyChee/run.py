@@ -222,8 +222,8 @@ def run_ePIE(file, data_4D, Voltage, alpha, scan_step, scan_rotation_angle, scan
         BF_threshold = 0.5,                      # for calclulating aperture radius
         forced_aperture_radius = None,           # pixels, force the aperture radius to the given value, set to None if not needed
         e_f = 1e-9,                              # epsilon for reciprocal space updating
-        alpha_O = 1,
-        alpha_P = 1,
+        alpha_O = 1,                             # Alpha for rPIE Object; default is 1, which corresponds to ePIE
+        alpha_P = 1,                             # Alpha for rPIE Probe; default is 1, which corresponds to ePIE
         
         probe_orthog_constr = False,             # orthogonal constraint for mix-state probes
         sorting_probe = True,                    # then the probes are sorted by their energies
