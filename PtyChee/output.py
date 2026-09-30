@@ -83,7 +83,7 @@ def iterPtycho_LSQ_step_plot(Obj_LSQ_step, Prb_LSQ_step, save_results=True):
 
 
 
-def iterPtycho_proben_plot(proben, proben0, scan_rotation_angle, scan_flip, data_shape,
+def iterPtycho_proben_plot(proben, proben0, Prb_EW, scan_rotation_angle, scan_flip, data_shape,
                            show_probe_comparison = False,
                            show_proben_Amp = True,
                            show_proben_Phase = False,
@@ -98,11 +98,12 @@ def iterPtycho_proben_plot(proben, proben0, scan_rotation_angle, scan_flip, data
     if save_results:
         np.save(os.path.join(_LOG_DIR, "Probe_Complex.npy"), proben)
 
-
     if scan_flip:
         proben = np.flip(proben, axis=2)
+        Prb_EW = np.flip(Prb_EW, axis=1)
         scan_rotation_angle *= -1
     proben = rotate(proben, angle=scan_rotation_angle, axes=(1,2))
+    Prb_EW = rotate(Prb_EW, angle=scan_rotation_angle, axes=(0,1))
     dy_r, dx_r = proben[0].shape
     proben_shown = proben[:, int(dy_r/2)-int(dy/2):int(dy_r/2)+int(dy/2),int(dx_r/2)-int(dx/2):int(dx_r/2)+int(dx/2)]
 
@@ -126,7 +127,7 @@ def iterPtycho_proben_plot(proben, proben0, scan_rotation_angle, scan_flip, data
 
 
     if show_probe_comparison:
-        fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+        fig, axes = plt.subplots(1, 3, figsize=(10, 4))
 
         plt.sca(axes[0])
         RGB_Complex_Plot(proben0[0])
@@ -140,8 +141,14 @@ def iterPtycho_proben_plot(proben, proben0, scan_rotation_angle, scan_flip, data
         axes[1].set_xticks([])
         axes[1].set_yticks([])
 
+        plt.sca(axes[2])
+        RGB_Complex_Plot(Prb_EW)
+        axes[2].set_title('Exit Probe')
+        axes[2].set_xticks([])
+        axes[2].set_yticks([])
+
         fig.subplots_adjust(wspace=0.1, hspace=0.2, left=0.1, right=0.85, top=0.9, bottom=0.06)  
-        cbar_ax = fig.add_axes([0.88, 0.06, 0.02, 0.84]) # [left, bottom, width, height]
+        cbar_ax = fig.add_axes([0.88, 0.183, 0.02, 0.60]) # [left, bottom, width, height]
 
         sm = plt.cm.ScalarMappable(cmap=P_cmap, norm=P_norm)
         sm.set_array([])
@@ -273,6 +280,7 @@ def iterPtycho_objFunc_plot(objectn, scan_rotation_angle, scan_flip, ptycho_move
 
     if save_results:
         tifffile.imwrite(os.path.join(_LOG_DIR, "Object_Phase.tif"), np.angle(objectn_shown), photometric='minisblack')
+        tifffile.imwrite(os.path.join(_LOG_DIR, "Object_Amplitude.tif"), np.abs(objectn_shown), photometric='minisblack')
 
 
     objectn_abs = np.abs(objectn_shown)
@@ -348,7 +356,7 @@ def iterPtycho_objFunc_plot(objectn, scan_rotation_angle, scan_flip, ptycho_move
         plt.show()
 
 
-    print('Object Function Summed')
+    # print('Object Function Summed')
     fig, axes = plt.subplots(1, 2, figsize=(10, 4))
 
     axes[0].imshow(np.sum(np.abs(objectn_shown), axis=0), cmap='gray')

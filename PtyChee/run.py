@@ -102,7 +102,7 @@ def run_iCoM(file, data_4D, scan_rotation_angle, scan_flip,
 
 
 
-def run_msLSQML(file, data_4D, Voltage, alpha, scan_step, scan_rotation_angle, scan_flip,
+def run_LSQML(file, data_4D, Voltage, alpha, scan_step, scan_rotation_angle, scan_flip,
         defocus,
         n_state,                                 # probe states number
         n_slice,                                 # object slices number
@@ -111,23 +111,31 @@ def run_msLSQML(file, data_4D, Voltage, alpha, scan_step, scan_rotation_angle, s
         s_O,                                     # step size for updating Object Function
         s_P,                                     # step size for updating Probe Function
         n_block = None,                          # block number：The CBEDs are divided into n_block blocks for batch computing, must be divisible by the number of scanning positions
-        position_clustering = False,              # positiosn clustering or not in one block
-        pc_start_iteration = None,
+        position_clustering = False,             # cluster spatially adjacent scan positions; otherwise, positions are randomly assigned 
+        plot_cluster = False,                    # plot position clustering
         BF_threshold = 0.5,                      # for calclulating aperture radius
         forced_aperture_radius = None,           # pixels, force the aperture radius to the given value, set to None if not needed
         e_f = 1e-9,                              # epsilon for reciprocal space updating
         e_g = 1e-1,                              # epsilin for real space updating
         e_LSQ = 5e-1,                            # eplison for LSQ step calculation
+
         probe_orthog_constr = False,             # orthogonal constraint for mix-state probes
         sorting_probe = True,                    # then the probes are sorted by their energies
+        probe_fit = False,                       # fit probe into Zernike polynomials
+        s_position_correction = 0,               # step of position correction
+        pc_start_iteration = None,               # position correction start from this iteration
+
+        Obj_pad = 10,                            # pad zero to the object function in x and y dimensions
         POA = False,                             # phase object approximation constraint 
-        ks_softThreshold = 0,                    # soft threshold for sparse constraint on object FFT
-        kh_hardThreshold = 0,                    # hard threshold for sparse constraint on object FFT
+        l2_fft_lambdaTikhonov = 0,               # Tikhonov constraint on object
+        l1_fft_softThreshold = 0,                # soft threshold for sparse constraint on object FFT
+        l0_fft_hardThreshold = 0,                # hard threshold for sparse constraint on object FFT
         kz_regularization = 0,                   # kz constraint for the 'missing cone problem'
         rh_positive_phase = False,               # rh constraint: If True, all negative values in the phase result are clipped
-        FFT_phase_offset = 0,
-        S_position_correction = 0,
-        Obj_pad = 10,
+        FFT_phase_offset = 0,                    # phase offset to remove donut shape
+
+        device = None,                           # specify the GPU device or use "cpu"
+
         plot_and_save_err = True,
         plot_and_save_LSQ_step = False,
         plot_and_save_object = True,
@@ -137,7 +145,8 @@ def run_msLSQML(file, data_4D, Voltage, alpha, scan_step, scan_rotation_angle, s
         save_results = True,
 ):
     print_and_log('')
-    print_and_log(f'multi-slice LSQML')
+    print_and_log(f'LSQML')
+    print_and_log('')
     print_and_log(f'File: {file}')
     print_and_log('')
     print_and_log(f'################ Experimental Information ################')
@@ -157,65 +166,83 @@ def run_msLSQML(file, data_4D, Voltage, alpha, scan_step, scan_rotation_angle, s
 
     proben0, k_theta = initialize_iterPtycho_probe_mixstates(paCBED, reciprocalSpace_pixel_size, Voltage, defocus, n_state)
     objectn = inialize_iterPtycho_object_multislice(data_shape, posset, n_slice, Obj_pad = Obj_pad)
-    propagators = initialize_iterPtycho_z_propagators(Voltage, k_theta, slice_thickness)
 
-
-    msLSQML_results = msLSQML_pc_engine(iter_max, s_O, s_P, S_position_correction,
-                data_4D, posset, proben0, objectn, propagators,
+    LSQML_results = LSQML_engine(iter_max, s_O, s_P,
+                data_4D, Voltage, alpha, aperture_radius, 
+                posset, proben0, objectn, slice_thickness, k_theta,
+                device = device,
                 n_block = n_block, 
-                position_clustering = position_clustering,
-                pc_start_iteration = pc_start_iteration,
+                position_clustering = position_clustering, 
+                plot_cluster = plot_cluster,
                 e_f = e_f,
                 e_g = e_g,
                 e_LSQ = e_LSQ,
                 probe_orthog_constr = probe_orthog_constr,
-                sorting_probe = sorting_probe ,
+                sorting_probe = sorting_probe,
+                probe_fit = probe_fit,
+                s_position_correction = s_position_correction,
+                pc_start_iteration = pc_start_iteration,
                 POA = POA, 
-                ks_softThreshold = ks_softThreshold,
-                kh_hardThreshold = kh_hardThreshold,
+                l2_fft_lambdaTikhonov = l2_fft_lambdaTikhonov,
+                l1_fft_softThreshold = l1_fft_softThreshold,
+                l0_fft_hardThreshold = l0_fft_hardThreshold,
                 kz_regularization = kz_regularization,
                 rh_positive_phase = rh_positive_phase,
                 FFT_phase_offset = FFT_phase_offset,
     )
-    msLSQML_Obj, msLSQML_Prb, msLSQML_err, Obj_LSQ_step, Prb_LSQ_step, pc_mean_shift, posset_pc = msLSQML_results
+    LSQML_Obj, LSQML_Prb, Prb_EW, LSQML_err, Obj_LSQ_step, Prb_LSQ_step, pc_mean_shift, posset_pc = LSQML_results
 
     print_and_log('')
     print_and_log(f'################### Saving and Ploting ###################')
     if plot_and_save_err:    
-        iterPtycho_error_plot(msLSQML_err, save_results=save_results)
+        iterPtycho_error_plot(LSQML_err, save_results=save_results)
     if plot_and_save_LSQ_step:
         iterPtycho_LSQ_step_plot(Obj_LSQ_step, Prb_LSQ_step, save_results=save_results)
     if plot_and_save_object:
-        iterPtycho_objFunc_plot(msLSQML_Obj, scan_rotation_angle, scan_flip, ptycho_move, data_shape, slice_thickness, save_results=save_results)
+        iterPtycho_objFunc_plot(LSQML_Obj, scan_rotation_angle, scan_flip, ptycho_move, data_shape, slice_thickness, save_results=save_results)
     if plot_and_save_probe:
-        iterPtycho_proben_plot(msLSQML_Prb, proben0, scan_rotation_angle, scan_flip, data_shape, show_probe_comparison=show_probe_comparison, show_proben_Phase=show_proben_Phase, save_results=save_results)
-    if S_position_correction:
+        iterPtycho_proben_plot(LSQML_Prb, proben0, Prb_EW, scan_rotation_angle, scan_flip, data_shape, show_probe_comparison=show_probe_comparison, show_proben_Phase=show_proben_Phase, save_results=save_results)
+    if s_position_correction:
         position_correction_plot(pc_mean_shift, posset_pc, posset)
 
- 
 
 
-def run_msePIE(file, data_4D, Voltage, alpha, scan_step, scan_rotation_angle, scan_flip,
+
+def run_ePIE(file, data_4D, Voltage, alpha, scan_step, scan_rotation_angle, scan_flip,
         defocus,
         n_state,                                 # probe states number
-        n_slice,                                 # object slices number 
+        n_slice,                                 # object slices number
         slice_thickness,                         # object slice thickness in Å
         iter_max,                                # maximum iteration numner
         s_O,                                     # step size for updating Object Function
         s_P,                                     # step size for updating Probe Function
+        n_block = None,                          # block number：The CBEDs are divided into n_block blocks for batch computing, must be divisible by the number of scanning positions
+        position_clustering = False,             # cluster spatially adjacent scan positions; otherwise, positions are randomly assigned 
+        plot_cluster = False,                    # plot position clustering
         BF_threshold = 0.5,                      # for calclulating aperture radius
         forced_aperture_radius = None,           # pixels, force the aperture radius to the given value, set to None if not needed
         e_f = 1e-9,                              # epsilon for reciprocal space updating
-        position_shuffle = True,                 # shuffle the order of the scanning positions, can effectively suppress some periodic artifacts
-        probe_orthog_constr = False,             # orthogonal constraint for mix-state probes 
-        sorting_probe = True,                    # then the probes are sorted by their energies 
-        POA = False,                             # phase object approximation constraint
-        ks_softThreshold = 0,                    # soft threshold for sparse constraint on object FFT
-        kh_hardThreshold = 0,                    # hard threshold for sparse constraint on object FFT
+        alpha_O = 1,
+        alpha_P = 1,
+        
+        probe_orthog_constr = False,             # orthogonal constraint for mix-state probes
+        sorting_probe = True,                    # then the probes are sorted by their energies
+        probe_fit = False,                       # fit probe into Zernike polynomials
+        s_position_correction = 0,               # step of position correction
+        pc_start_iteration = None,               # position correction start from this iteration
+
+        Obj_pad = 10,                            # pad zero to the object function in x and y dimensions
+        POA = False,                             # phase object approximation constraint 
+        l2_fft_lambdaTikhonov = 0,               # Tikhonov constraint on object
+        l1_fft_softThreshold = 0,                # soft threshold for sparse constraint on object FFT
+        l0_fft_hardThreshold = 0,                # hard threshold for sparse constraint on object FFT
         kz_regularization = 0,                   # kz constraint for the 'missing cone problem'
         rh_positive_phase = False,               # rh constraint: If True, all negative values in the phase result are clipped
-        Obj_pad = 30,
-        plot_and_save_err = True,                   
+        FFT_phase_offset = 0,                    # phase offset to remove donut shape
+
+        device = None,                           # specify the GPU device or use "cpu"
+
+        plot_and_save_err = True,
         plot_and_save_object = True,
         plot_and_save_probe = True,
         show_probe_comparison = False, 
@@ -223,7 +250,8 @@ def run_msePIE(file, data_4D, Voltage, alpha, scan_step, scan_rotation_angle, sc
         save_results = True,
 ):
     print_and_log('')
-    print_and_log(f'multi-slice ePIE')
+    print_and_log(f'ePIE')
+    print_and_log('')
     print_and_log(f'File: {file}')
     print_and_log('')
     print_and_log(f'################ Experimental Information ################')
@@ -239,35 +267,48 @@ def run_msePIE(file, data_4D, Voltage, alpha, scan_step, scan_rotation_angle, sc
     paCBED, aperture_radius, *_ = PACBED_identify(data_4D, BF_threshold, forced_aperture_radius = forced_aperture_radius)
     reciprocalSpace_pixel_size = calculate_recipro_pixeSize(Voltage, alpha, aperture_radius)
     ptycho_move = calculate_iterPtycho_move(reciprocalSpace_pixel_size, scan_step, data_shape)
-    posset = initialize_iterPtycho_patch_position(data_shape, scan_rotation_angle, scan_flip, ptycho_move, Obj_pad=Obj_pad)
+    posset = initialize_iterPtycho_patch_position(data_shape, scan_rotation_angle, scan_flip, ptycho_move, Obj_pad = Obj_pad)
 
     proben0, k_theta = initialize_iterPtycho_probe_mixstates(paCBED, reciprocalSpace_pixel_size, Voltage, defocus, n_state)
-    objectn = inialize_iterPtycho_object_multislice(data_shape, posset, n_slice, Obj_pad=Obj_pad)
-    propagators = initialize_iterPtycho_z_propagators(Voltage, k_theta, slice_thickness)
+    objectn = inialize_iterPtycho_object_multislice(data_shape, posset, n_slice, Obj_pad = Obj_pad)
 
-    msePIE_results = msePIE_engine(iter_max, s_O, s_P, 
-                data_4D, posset, proben0, objectn, propagators,
+    ePIE_results = ePIE_engine(iter_max, s_O, s_P,
+                data_4D, Voltage, alpha, aperture_radius, 
+                posset, proben0, objectn, slice_thickness, k_theta,
+                device = device,
+                n_block = n_block, 
+                position_clustering = position_clustering, 
+                plot_cluster = plot_cluster,
                 e_f = e_f,
-                position_shuffle = position_shuffle,
+                alpha_O=alpha_O,
+                alpha_P=alpha_P,
                 probe_orthog_constr = probe_orthog_constr,
-                sorting_probe = sorting_probe ,
+                sorting_probe = sorting_probe,
+                probe_fit = probe_fit,
+                s_position_correction = s_position_correction,
+                pc_start_iteration = pc_start_iteration,
                 POA = POA, 
-                ks_softThreshold = ks_softThreshold,
-                kh_hardThreshold = kh_hardThreshold,
+                l2_fft_lambdaTikhonov = l2_fft_lambdaTikhonov,
+                l1_fft_softThreshold = l1_fft_softThreshold,
+                l0_fft_hardThreshold = l0_fft_hardThreshold,
                 kz_regularization = kz_regularization,
                 rh_positive_phase = rh_positive_phase,
+                FFT_phase_offset = FFT_phase_offset,
     )
-    msePIE_Obj, msePIE_Prb, msePIE_err = msePIE_results
+    ePIE_Obj, ePIE_Prb, Prb_EW, ePIE_err, pc_mean_shift, posset_pc = ePIE_results
+
+    print(Prb_EW.shape)
 
     print_and_log('')
     print_and_log(f'################### Saving and Ploting ###################')
     if plot_and_save_err:    
-        iterPtycho_error_plot(msePIE_err, save_results=save_results)
+        iterPtycho_error_plot(ePIE_err, save_results=save_results)
     if plot_and_save_object:
-        iterPtycho_objFunc_plot(msePIE_Obj, scan_rotation_angle, scan_flip, ptycho_move, data_shape, slice_thickness, save_results=save_results)
+        iterPtycho_objFunc_plot(ePIE_Obj, scan_rotation_angle, scan_flip, ptycho_move, data_shape, slice_thickness, save_results=save_results)
     if plot_and_save_probe:
-        iterPtycho_proben_plot(msePIE_Prb, proben0, scan_rotation_angle, scan_flip, data_shape, show_probe_comparison=show_probe_comparison, show_proben_Phase=show_proben_Phase, save_results=save_results)
-
+        iterPtycho_proben_plot(ePIE_Prb, proben0, Prb_EW, scan_rotation_angle, scan_flip, data_shape, show_probe_comparison=show_probe_comparison, show_proben_Phase=show_proben_Phase, save_results=save_results)
+    if s_position_correction:
+        position_correction_plot(pc_mean_shift, posset_pc, posset)
 
 
 
