@@ -859,9 +859,6 @@ def LSQML_engine(iter_max, s_O, s_P,
             for ns in range(n_state):
                 proben_GPU[ns] = fit_probe_with_aberration(proben_GPU[ns], wavelength, alpha, aperture_radius, device=device)["probe_fit"]
 
-        if kz_regularization > 0:
-            object_GPU = kz_constraint(object_GPU, Wz)
-
         if l2_fft_lambdaTikhonov > 0:
             object_GPU = l2_fft_constraint(object_GPU, n_slice, l2_fft_lambdaTikhonov)
 
@@ -871,14 +868,17 @@ def LSQML_engine(iter_max, s_O, s_P,
         if l0_fft_hardThreshold > 0:
             object_GPU = l0_fft_constraint(object_GPU, n_slice, l0_fft_hardThreshold)
 
+        if kz_regularization > 0:
+            object_GPU = kz_constraint(object_GPU, Wz)
+
+        if FFT_phase_offset > 0 and i > iter_max * 2 / 3:
+            object_GPU = FFT_phase0_offset(object_GPU, n_slice, FFT_phase_offset)
+
         if rh_positive_phase:
             object_GPU = rh_constraint(object_GPU, n_slice, rh_hardThreshold=0)
 
         if POA:
             object_GPU = POA_constraint(object_GPU)
-
-        if FFT_phase_offset > 0 and i > iter_max * 2 / 3:
-            object_GPU = FFT_phase0_offset(object_GPU, n_slice, FFT_phase_offset)
 
 
         time_is = time.time() - time_i0
@@ -1178,9 +1178,6 @@ def ePIE_engine(iter_max, s_O, s_P,
             for ns in range(n_state):
                 proben_GPU[ns] = fit_probe_with_aberration(proben_GPU[ns], wavelength, alpha, aperture_radius, device=device)["probe_fit"]
 
-        if kz_regularization > 0:
-            object_GPU = kz_constraint(object_GPU, Wz)
-
         if l2_fft_lambdaTikhonov > 0:
             object_GPU = l2_fft_constraint(object_GPU, n_slice, l2_fft_lambdaTikhonov)
 
@@ -1190,14 +1187,17 @@ def ePIE_engine(iter_max, s_O, s_P,
         if l0_fft_hardThreshold > 0:
             object_GPU = l0_fft_constraint(object_GPU, n_slice, l0_fft_hardThreshold)
 
+        if kz_regularization > 0:
+            object_GPU = kz_constraint(object_GPU, Wz)
+            
+        if FFT_phase_offset > 0 and i > iter_max * 2 / 3:
+            object_GPU = FFT_phase0_offset(object_GPU, n_slice, FFT_phase_offset)
+
         if rh_positive_phase:
             object_GPU = rh_constraint(object_GPU, n_slice, rh_hardThreshold=0)
 
         if POA:
             object_GPU = POA_constraint(object_GPU)
-
-        if FFT_phase_offset > 0 and i > iter_max * 2 / 3:
-            object_GPU = FFT_phase0_offset(object_GPU, n_slice, FFT_phase_offset)
 
 
         time_is = time.time() - time_i0

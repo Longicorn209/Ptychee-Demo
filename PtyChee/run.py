@@ -127,7 +127,7 @@ def run_LSQML(file, data_4D, Voltage, alpha, scan_step, scan_rotation_angle, sca
 
         Obj_pad = 10,                            # pad zero to the object function in x and y dimensions
         POA = False,                             # phase object approximation constraint 
-        l2_fft_lambdaTikhonov = 0,               # Tikhonov constraint on object
+        l2_fft_lambdaTikhonov = 0,               # Tikhonov constraint on object (l2 constraint on object FFT)
         l1_fft_softThreshold = 0,                # soft threshold for sparse constraint on object FFT
         l0_fft_hardThreshold = 0,                # hard threshold for sparse constraint on object FFT
         kz_regularization = 0,                   # kz constraint for the 'missing cone problem'
@@ -233,7 +233,7 @@ def run_ePIE(file, data_4D, Voltage, alpha, scan_step, scan_rotation_angle, scan
 
         Obj_pad = 10,                            # pad zero to the object function in x and y dimensions
         POA = False,                             # phase object approximation constraint 
-        l2_fft_lambdaTikhonov = 0,               # Tikhonov constraint on object
+        l2_fft_lambdaTikhonov = 0,               # Tikhonov constraint on object (l2 constraint on object FFT)
         l1_fft_softThreshold = 0,                # soft threshold for sparse constraint on object FFT
         l0_fft_hardThreshold = 0,                # hard threshold for sparse constraint on object FFT
         kz_regularization = 0,                   # kz constraint for the 'missing cone problem'
