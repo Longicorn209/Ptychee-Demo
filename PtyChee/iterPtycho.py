@@ -794,16 +794,23 @@ def LSQML_engine(iter_max, s_O, s_P,
                     I_patches_fft = fft2(Illuminated_patches[sr], dim=(1, 2))
                     I_patches_gx = ifft2(2j * torch.pi * I_patches_fft * qmx[None, :, :], dim=(1, 2))
                     I_patches_gy = ifft2(2j * torch.pi * I_patches_fft * qmy[None, :, :], dim=(1, 2))
+
                     gxP = I_patches_gx * Prb_ms[sr][0]
                     Mr_x = (gxP.conj() * chi[0]).real.sum(dim=(1, 2))
                     Ml_x = gxP.abs().pow(2).sum(dim=(1, 2))
                     gx = s_position_correction * (Mr_x / Ml_x).real
+
                     gyP = I_patches_gy * Prb_ms[sr][0]
                     Mr_y = (gyP.conj() * chi[0]).real.sum(dim=(1, 2))
                     Ml_y = gyP.abs().pow(2).sum(dim=(1, 2))
                     gy = s_position_correction * (Mr_y / Ml_y).real
+
                     pos_block[:, 2] += gy
                     pos_block[:, 3] += gx
+
+                    pos_block[:, 2].clamp_(0, Oy - 1 - dy)
+                    pos_block[:, 3].clamp_(0, Ox - 1 - dx)
+                    
                     pc_shift[i] += (gy ** 2 + gx ** 2).sqrt().sum()
 
 
@@ -836,6 +843,10 @@ def LSQML_engine(iter_max, s_O, s_P,
 
                 pos_block[:, 2] += gy
                 pos_block[:, 3] += gx
+
+                pos_block[:, 2].clamp_(0, Oy - 1 - dy)
+                pos_block[:, 3].clamp_(0, Ox - 1 - dx)
+
                 pc_shift[i] += (gy.pow(2) + gx.pow(2)).sqrt().sum()
 
             err_u += (amplitudes_patches - (psi_fft.abs().pow(2).sum(dim=0)).sqrt()).pow(2).sum()
@@ -850,7 +861,7 @@ def LSQML_engine(iter_max, s_O, s_P,
                 plt.title("Convergence Curve")
                 plt.tight_layout()
 
-            raise ValueError("err is NaN")
+            raise ValueError("err is NaN. Try using smaller values of s_O and s_P")
         
         err[i] = err_u / err_d
         posset_GPU = torch.cat(posset_blocks, dim=0)
@@ -1123,6 +1134,10 @@ def ePIE_engine(iter_max, s_O, s_P,
 
                     pos_block[:, 2] += gy
                     pos_block[:, 3] += gx
+
+                    pos_block[:, 2].clamp_(0, Oy - 1 - dy)
+                    pos_block[:, 3].clamp_(0, Ox - 1 - dx)
+                    
                     pc_shift[i] += (gy ** 2 + gx ** 2).sqrt().sum()
 
             if i >= pc_start_iteration and s_position_correction and pc_mode == 'intensity':
@@ -1155,6 +1170,10 @@ def ePIE_engine(iter_max, s_O, s_P,
 
                 pos_block[:, 2] += gy
                 pos_block[:, 3] += gx
+
+                pos_block[:, 2].clamp_(0, Oy - 1 - dy)
+                pos_block[:, 3].clamp_(0, Ox - 1 - dx)
+
                 pc_shift[i] += (gy.pow(2) + gx.pow(2)).sqrt().sum()
 
             err_u += (amplitudes_patches - (psi_fft.abs().pow(2).sum(dim=0)).sqrt()).pow(2).sum()
@@ -1169,7 +1188,7 @@ def ePIE_engine(iter_max, s_O, s_P,
                 plt.title("Convergence Curve")
                 plt.tight_layout()
 
-            raise ValueError("err is NaN")
+            raise ValueError("err is NaN. Try using smaller values of s_O and s_P")
 
         err[i] = err_u / err_d
         posset_GPU = torch.cat(posset_blocks, dim=0)
