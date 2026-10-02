@@ -21,7 +21,7 @@ Current demonstration modules include:
 - Simple parallax reconstruction (tcBF)
 - Ptychographic reconstruction:<br>
     analytical WDD and SSB methods<br>
-    iterative LSQML and ePIE methods (mixed-state and multi-slice implementations)
+    iterative LSQML and ePIE methods
 
 ## Installation
 ```bash
