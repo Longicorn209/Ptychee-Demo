@@ -1,6 +1,6 @@
 """
 Author: Zeyu Wang
-Date: September 2025
+Date: October 2026
 Description: "results plotting and saving"
 """
 
@@ -35,7 +35,7 @@ def curl_curve_plot(test_angle_range, mean_curl, mean_curl_flip, save_results=Tr
 
 
 
-def iterPtycho_error_plot(err, save_results=True):
+def iter_error_plot(err, save_results=True):
 
     plt.figure(figsize=(6,4))
     plt.semilogy(range(len(err[1:])), err[1:])
@@ -51,7 +51,8 @@ def iterPtycho_error_plot(err, save_results=True):
     _LOG_DIR = print_and_log("Error saving")
 
     if save_results:
-        np.save(os.path.join(_LOG_DIR, "convergence_curve.npy"), err)
+        #np.save(os.path.join(_LOG_DIR, "convergence_curve.npy"), err)
+        np.savetxt(os.path.join(_LOG_DIR, "convergence_curve.txt"), err)
         outfile = os.path.join(_LOG_DIR, "convergence_curve.png")
         plt.savefig(outfile, dpi=300)
 
@@ -76,11 +77,136 @@ def iterPtycho_LSQ_step_plot(Obj_LSQ_step, Prb_LSQ_step, save_results=True):
     if save_results:
         #np.save(os.path.join(_LOG_DIR, "Object_LSQ_step.npy"), Obj_LSQ_step)
         #np.save(os.path.join(_LOG_DIR, "Probe_LSQ_step.npy"), Prb_LSQ_step)
+        #np.savetxt(os.path.join(_LOG_DIR, "Object_LSQ_step.txt"), Obj_LSQ_step)
+        #np.savetxt(os.path.join(_LOG_DIR, "Probe_LSQ_step.txt"), Prb_LSQ_step)
         outfile = os.path.join(_LOG_DIR, "LSQ_step.png")
         fig.savefig(outfile, dpi=300)  
 
     plt.show()
 
+
+
+# def iterPtycho_CBED_comparison_plot(cbed_comparison, save_results=True):
+
+#     fig, axes = plt.subplots(2, 2, figsize=(9.8, 8))
+
+#     axes = axes.flat
+
+#     vmin_left = cbed_comparison[[0, 2]].min()
+#     vmax_left = cbed_comparison[[0, 2]].max()
+
+#     vmin_right = cbed_comparison[[1, 3]].min()
+#     vmax_right = cbed_comparison[[1, 3]].max()
+
+#     im0 = axes[0].imshow(cbed_comparison[0], vmin=vmin_left, vmax=vmax_left)
+#     axes[0].set_title('CBED exp.')
+#     axes[0].set_xticks([])
+#     axes[0].set_yticks([])
+
+#     im1 = axes[1].imshow(cbed_comparison[1], vmin=vmin_right, vmax=vmax_right)
+#     axes[1].set_title('CBED recon.')
+#     axes[1].set_xticks([])
+#     axes[1].set_yticks([])
+
+#     im2 = axes[2].imshow(cbed_comparison[2], vmin=vmin_left, vmax=vmax_left)
+#     axes[2].set_xticks([])
+#     axes[2].set_yticks([])
+
+#     im3 = axes[3].imshow(cbed_comparison[3], vmin=vmin_right, vmax=vmax_right)
+#     axes[3].set_xticks([])
+#     axes[3].set_yticks([])
+
+#     fig.subplots_adjust(left=0.12, right=0.88, bottom=0.05, top=0.95, wspace=0.15, hspace=0.08)
+
+#     pos_left_top = axes[0].get_position()
+#     pos_left_bottom = axes[2].get_position()
+#     pos_right_top = axes[1].get_position()
+#     pos_right_bottom = axes[3].get_position()
+
+#     gap = 0.035
+#     cbar_width = 0.025
+
+#     cbar_ax_left = fig.add_axes([pos_left_top.x0 - gap - cbar_width, pos_left_bottom.y0, cbar_width, pos_left_top.y1 - pos_left_bottom.y0])
+#     cbar_ax_right = fig.add_axes([pos_right_top.x1 + gap, pos_right_bottom.y0, cbar_width, pos_right_top.y1 - pos_right_bottom.y0])
+
+#     cbar_left = fig.colorbar(im0, cax=cbar_ax_left)
+#     cbar_right = fig.colorbar(im1, cax=cbar_ax_right)
+
+#     cbar_ax_left.yaxis.set_ticks_position('left')
+#     cbar_ax_left.yaxis.set_label_position('left')
+
+#     _LOG_DIR = print_and_log("CBED Comparison saving")
+#     if save_results:
+#         outfile = os.path.join(_LOG_DIR, "CBED_Comparison.png")
+#         fig.savefig(outfile, dpi=300)  
+
+#     plt.show()
+
+
+
+def iterPtycho_CBED_comparison_plot(cbed_comparison, save_results=True):
+
+    fig, axes = plt.subplots(2, 3, figsize=(12, 9))
+
+    residual_0 = cbed_comparison[0] - cbed_comparison[1]
+    residual_1 = cbed_comparison[2] - cbed_comparison[3]
+
+    vmin_exp = cbed_comparison[[0, 2]].min()
+    vmax_exp = cbed_comparison[[0, 2]].max()
+
+    vmin_recon = cbed_comparison[[1, 3]].min()
+    vmax_recon = cbed_comparison[[1, 3]].max()
+
+    vmax_residual = max(np.abs(residual_0).max(), np.abs(residual_1).max())
+
+    ims = [
+        [
+            axes[0, 0].imshow(cbed_comparison[0], vmin=vmin_exp, vmax=vmax_exp, aspect='equal'),
+            axes[0, 1].imshow(cbed_comparison[1], vmin=vmin_recon, vmax=vmax_recon, aspect='equal'),
+            axes[0, 2].imshow(residual_0, cmap='RdBu_r', vmin=-vmax_residual, vmax=vmax_residual, aspect='equal')
+        ],
+        [
+            axes[1, 0].imshow(cbed_comparison[2], vmin=vmin_exp, vmax=vmax_exp, aspect='equal'),
+            axes[1, 1].imshow(cbed_comparison[3], vmin=vmin_recon, vmax=vmax_recon, aspect='equal'),
+            axes[1, 2].imshow(residual_1, cmap='RdBu_r', vmin=-vmax_residual, vmax=vmax_residual, aspect='equal')
+        ]
+    ]
+
+    col_labels = ['CBED exp.', 'CBED recon.', 'Residual']
+    row_labels = ['Position 1', 'Position 2']
+
+    for i in range(2):
+        for j in range(3):
+            axes[i, j].set_xticks([])
+            axes[i, j].set_yticks([])
+            for spine in axes[i, j].spines.values():
+                spine.set_visible(False)
+
+    for j in range(3):
+        axes[0, j].set_title(col_labels[j], fontsize=15, fontweight='medium', pad=10)
+
+    for i in range(2):
+        axes[i, 0].text(-0.055, 0.5, row_labels[i], transform=axes[i, 0].transAxes, ha='right', va='center', rotation=90, fontsize=13)
+
+    fig.subplots_adjust(left=0.05, right=0.98, bottom=0.11, top=0.91, wspace=0.04, hspace=0.04)
+
+    # Colorbars
+    fig.canvas.draw()
+
+    for j, im in enumerate([ims[0][0], ims[0][1], ims[0][2]]):
+        pos = axes[1, j].get_position()
+        cbar_ax = fig.add_axes([pos.x0, pos.y0 - 0.035, pos.width, 0.022])
+        cbar = fig.colorbar(im, cax=cbar_ax, orientation='horizontal')
+        cbar.ax.tick_params(labelsize=11, length=3, width=0.8, pad=3)
+        cbar.outline.set_linewidth(0.8)
+
+    _LOG_DIR = print_and_log("CBED Comparison saving")
+    if save_results:
+        outfile = os.path.join(_LOG_DIR, "CBED_Comparison.png")
+        fig.savefig(outfile, dpi=300)  
+
+    plt.show()
+    
 
 
 def iterPtycho_proben_plot(proben, proben0, Prb_EW, scan_rotation_angle, scan_flip, data_shape,
@@ -393,6 +519,7 @@ def iterPtycho_objFunc_plot(objectn, scan_rotation_angle, scan_flip, ptycho_move
             plt.savefig(outfile, dpi=300)
 
         plt.show()
+
 
 
 
@@ -784,5 +911,139 @@ def vSTEM_plot(vSTEM_siries, radius_list, save_results=True):
 
     plt.show()
 
+
+
+def dimReduction_plot(W, H, 
+                    Lambda = None,
+                    show_W = True,
+                    show_H = True,
+                    save_results = True,
+                    ):
+
+    _LOG_DIR = print_and_log("Dimensional Reduction results saving")
+
+    n_comp, sy, sx = W.shape
+    n_comp, dy, dx = H.shape
+
+
+    if Lambda is not None:
+        Lambda = np.diag(Lambda) if np.ndim(Lambda) == 2 else np.asarray(Lambda).ravel()
+        Lambda = np.maximum(Lambda, 0)
+        explained_ratio = Lambda / max(Lambda.sum(), 1e-12)
+        cumulative_ratio = np.cumsum(explained_ratio)
+        components = np.arange(1, len(Lambda) + 1)
+
+        fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
+
+        axes[0].plot(components, Lambda, 'o-', color='black', markersize=3)
+        axes[0].set(xlabel='Principal Component', ylabel='Eigenvalue', title='PCA Scree Plot')
+        axes[0].margins(x=0.05, y=0.1)
+        axes[0].grid(True, linestyle='--', alpha=0.3)
+
+        axes[1].plot(components, cumulative_ratio * 100, color='black')
+        axes[1].set(xlabel='Number of Principal Components', ylabel='Cumulative Explained Variance (%)', title='Cumulative Explained Variance', ylim=(-5, 105))
+        axes[1].margins(x=0.05)
+
+        for threshold in [90, 95, 99]:
+            axes[1].axhline(threshold, color='gray', linestyle='--', linewidth=0.8, alpha=0.6)
+
+        for threshold in [0.90, 0.95, 0.99]:
+            idx = np.searchsorted(cumulative_ratio, threshold)
+            if idx < len(Lambda):
+                axes[1].axvline(idx + 1, color='gray', linestyle=':', linewidth=0.8, alpha=0.6)
+
+        for ax in axes:
+            ax.spines[['top', 'right']].set_visible(False)
+            ax.grid(True, linestyle='--', alpha=0.3)
+
+        fig.tight_layout()
+
+        if save_results:
+            plt.savefig(os.path.join(_LOG_DIR, "PCA Eigenvalues.png"), dpi=300, bbox_inches='tight', pad_inches=0.15)
+
+        plt.show()
+
+
+    if save_results:
+        # np.save(os.path.join(_LOG_DIR, "W.npy"), W)
+        # np.save(os.path.join(_LOG_DIR, "H.npy"), H)
+        tifffile.imwrite(os.path.join(_LOG_DIR, "W.tif"), W, photometric='minisblack')
+        tifffile.imwrite(os.path.join(_LOG_DIR, "H.tif"), H, photometric='minisblack')
+
+    n_shown_max = 30
+    if n_comp > n_shown_max:
+        n_comp = n_shown_max
+        W = W[:n_shown_max]
+        H = H[:n_shown_max]
+
+    comp_shown_rows, comp_shown_cols = get_subplot_grid(n_comp)
+
+    Wmin, Wmax = W.min(), W.max()
+    W_norm = plt.Normalize(vmin=Wmin, vmax=Wmax)
+
+    Hmin, Hmax = H.min(), H.max()
+    H_norm = plt.Normalize(vmin=Hmin, vmax=Hmax)
+
+    if show_W:
+        fig, axes = plt.subplots(
+                    comp_shown_rows,
+                    comp_shown_cols,
+                    figsize=(comp_shown_cols*4.7, comp_shown_rows*4),
+                    constrained_layout=False
+                    )
+        axes = np.array([axes]).flatten()
+
+        for ax in axes[n_comp:]:
+            ax.axis("off")
+
+        fig.subplots_adjust(wspace=0.2, hspace=0.2, left=0.03, right=0.85, top=0.97, bottom=0.03)  
+        cbar_ax = fig.add_axes([0.88, 0.03, 0.02, 0.94])  # [left, bottom, width, height]
+
+        sm = plt.cm.ScalarMappable(cmap='gray', norm=W_norm)
+        sm.set_array([])
+        fig.colorbar(sm, cax=cbar_ax, label="W")
+
+        for i in range(n_comp):
+            axes[i].imshow(W[i], cmap='gray', vmin=Wmin, vmax=Wmax)
+            axes[i].set_title(f'Weight of {(i+1)}th Component', fontsize=10)
+            axes[i].set_xticks([])
+            axes[i].set_yticks([])
+
+        if save_results:
+            outfile = os.path.join(_LOG_DIR, "Dimensional Reduction Weights.png")
+            plt.savefig(outfile, dpi=300)
+
+        plt.show()
+
+    if show_H:
+        fig, axes = plt.subplots(
+                    comp_shown_rows,
+                    comp_shown_cols,
+                    figsize=(comp_shown_cols*4.7, comp_shown_rows*4),
+                    constrained_layout=False
+                    )
+        axes = np.array([axes]).flatten()
+
+        for ax in axes[n_comp:]:
+            ax.axis("off")
+
+        fig.subplots_adjust(wspace=0.2, hspace=0.2, left=0.03, right=0.85, top=0.97, bottom=0.03)  
+        cbar_ax = fig.add_axes([0.88, 0.03, 0.02, 0.94])  # [left, bottom, width, height]
+
+        sm = plt.cm.ScalarMappable(cmap='gray', norm=H_norm)
+        sm.set_array([])
+        fig.colorbar(sm, cax=cbar_ax, label="W")
+
+        for i in range(n_comp):
+            axes[i].imshow(H[i], cmap='gray', vmin=Hmin, vmax=Hmax)
+            axes[i].set_title(f'{(i+1)}th Component', fontsize=10)
+            axes[i].set_xticks([])
+            axes[i].set_yticks([])
+
+        if save_results:
+            outfile = os.path.join(_LOG_DIR, "Dimensional Reduction Components.png")
+            plt.savefig(outfile, dpi=300)
+
+        plt.show()
 
 

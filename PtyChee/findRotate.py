@@ -7,7 +7,37 @@ Description: "find best rotate angle and flip"
 import numpy as np
 #import matplotlib.pyplot as plt
 
-from .utils import print_and_log
+from .utils import print_and_log, annular_mask
+
+
+
+
+
+
+def calcualte_CoM_origin(data_4D, aperture_radius, center_dx, center_dy,
+                  inner_radius, 
+                  outer_radius, 
+                  ):
+    
+    print_and_log('')
+    print_and_log(f'################## Original CoM Process ##################')
+    print_and_log(f'inner_radiuss: {inner_radius} Alpha')
+    print_and_log(f'outer_radius: {outer_radius} Alpha')
+
+
+    paCBED = np.mean(data_4D,(0,1))
+    dy, dx = paCBED.shape
+
+    Annular_ROI = annular_mask(dy, dx, aperture_radius*inner_radius, aperture_radius*outer_radius, center_dy, center_dx)
+    masked_4D = data_4D * Annular_ROI
+
+    X, Y = np.meshgrid(np.arange(dx)-center_dx, np.arange(dy)-center_dy)
+    gx = np.average(masked_4D * X, axis=(2, 3))
+    gy = np.average(masked_4D * Y, axis=(2, 3))
+
+    return gx + 1j*gy
+
+
 
 
 def curl_curve(

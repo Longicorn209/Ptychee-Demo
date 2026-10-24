@@ -1,6 +1,6 @@
 """
 Author: Zeyu Wang & Xiaoyan Wu
-Date: September 2025
+Date: October 2026
 Description: "iterative ptychogrphay"
 """
 
@@ -14,6 +14,7 @@ from skimage.restoration import unwrap_phase
 
 import torch
 from torch.fft import fft2, ifft2, fftn, ifftn, fftshift, ifftshift, fftfreq
+import torch.nn.functional as F
 
 
 
@@ -75,11 +76,19 @@ def initialize_iterPtycho_probe(paCBED, reciprocalSpace_pixel_size, Voltage, def
 
     chi, k_theta = Chi_defocus(dy, dx, reciprocalSpace_pixel_size, Voltage, defocus)
 
-    # Ronchi_norm = (paCBED - np.amin(paCBED)) / np.ptp(paCBED)
-    # BFdisk = np.ones(Ronchi_norm.shape) * (Ronchi_norm > 0.5)
-    # ApeFunc = BFdisk*np.exp(-1j*chi) * np.mean(np.sqrt(paCBED))
+    Ronchi_norm = (paCBED - np.amin(paCBED)) / np.ptp(paCBED)
+    BFdisk = np.ones(Ronchi_norm.shape) * (Ronchi_norm > 0.5)
+    # ApeFunc = BFdisk * np.exp(-1j*chi) * np.mean(np.sqrt(paCBED))
 
-    ApeFunc = np.sqrt(paCBED)*np.exp(-1j*chi) #/ np.mean(np.sqrt(paCBED))
+    radius = np.sqrt(np.sum(BFdisk) / np.pi)
+    qy, qx = np.ogrid[:dy, :dx]
+    Aperture = ((qy - (dy - 1) / 2)**2 + (qx - (dx - 1) / 2)**2 <= radius**2).astype(np.float32)
+    ApeFunc = Aperture * np.exp(-1j * chi) / np.mean(Aperture) * np.mean(np.sqrt(paCBED))
+
+    # ApeFunc = Aperture * np.exp(-1j * chi) / np.sum(Aperture) * np.sqrt(np.sum(paCBED))
+
+    # ApeFunc = np.sqrt(paCBED)*np.exp(-1j*chi) #/ np.mean(np.sqrt(paCBED))
+
     
     probe0 = np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(ApeFunc)))
 
@@ -266,10 +275,10 @@ def probe_orthogonalization(proben, n_state, device):
 
 
 
-def build_pupil_phase_basis(N, r_mask, NA, device):
+def build_pupil_phase_basis(dy, dx, NA, r_mask, device):
     y, x = torch.meshgrid(
-        torch.linspace(-N//2, N//2-1, N, device=device),
-        torch.linspace(-N//2, N//2-1, N, device=device),
+        torch.linspace(-dy//2, dy//2-1, dy, device=device),
+        torch.linspace(-dx//2, dx//2-1, dx, device=device),
         indexing='ij')
 
     rho_pixels = torch.sqrt(x**2 + y**2)
@@ -311,16 +320,11 @@ def build_pupil_phase_basis(N, r_mask, NA, device):
 
 
 
-def fit_probe_with_aberration(probe, wavelength, NA, r_mask, device):
-
-    N = probe.shape[-1]
+def fit_probe_with_aberration(probe, wavelength, basis, mask, device):
 
     pupil = torch.fft.fftshift(torch.fft.ifft2(torch.fft.ifftshift(probe)))
     amp = torch.abs(pupil)
     phase = torch.angle(pupil)
-
-
-    basis, mask = build_pupil_phase_basis(N, r_mask, NA, device)
 
     phase_unwrap = torch.tensor(
         unwrap_phase((phase*mask).cpu().numpy()),
@@ -373,13 +377,20 @@ def fit_probe_with_aberration(probe, wavelength, NA, r_mask, device):
     }
 
 
+def apply_probe_support_mask(proben_GPU, mask):
+
+    proben_ape_GPU = fftshift(fft2(ifftshift(proben_GPU, dim=(1, 2)), dim=(1, 2)), dim=(1, 2))
+    proben_ape_GPU *= mask
+
+    return fftshift(ifft2(ifftshift(proben_ape_GPU, dim=(1, 2)), dim=(1, 2)), dim=(1, 2))
+
 
 def scan_position_clustering(posset_GPU, n_block, device, plot_cluster=False, mode='BKD'):
 
     if mode == 'Morton':        
         # Morton order spatial cluster
-        pos_y = posset_GPU[:, 2].to(torch.int64)
-        pos_x = posset_GPU[:, 3].to(torch.int64)
+        pos_y = posset_GPU[:, 2].to(torch.int32)
+        pos_x = posset_GPU[:, 3].to(torch.int32)
         max_coord = max(pos_y.max().item(), pos_x.max().item())
         n_bits = max(1, int(max_coord).bit_length())
         morton_code = torch.zeros_like(pos_x)
@@ -536,6 +547,25 @@ def l0_fft_constraint(object_GPU, n_slice, l0_hardThreshold):
 def kz_constraint(object_GPU, Wz):
     return ifftn(fftn(object_GPU)*Wz)
 
+# def kz_constraint(object_GPU, Wz):
+#     amp = torch.abs(object_GPU)
+#     phase = torch.angle(object_GPU)
+#     phase = torch.fft.ifftn(torch.fft.fftn(phase) * Wz).real
+#     return amp * torch.exp(1j * phase)
+
+
+def zblur_constraint(object_GPU, z_kernel):
+    n_slice = object_GPU.shape[0]
+    kernel_size = z_kernel.shape[-1]
+    pad = kernel_size // 2
+
+    obj = object_GPU.permute(1, 2, 0).reshape(-1, 1, n_slice)
+    obj = F.pad(obj, (pad, pad), mode='replicate')
+    obj = F.conv1d(obj, z_kernel)
+
+    object_GPU = obj.reshape(object_GPU.shape[1], object_GPU.shape[2], n_slice).permute(2, 0, 1)
+
+    return object_GPU
 
 
 def rh_constraint(object_GPU, n_slice, rh_hardThreshold=0):
@@ -571,6 +601,7 @@ def FFT_phase0_offset(object_GPU, n_slice, FFT_phase_offset=0):
 
 
 
+# @torch.no_grad()
 def LSQML_engine(iter_max, s_O, s_P,
                     data_4D, Voltage, alpha, aperture_radius, 
                     posset, proben0, objectn, slice_thickness, k_theta,
@@ -584,6 +615,7 @@ def LSQML_engine(iter_max, s_O, s_P,
                     probe_orthog_constr=False, 
                     sorting_probe=True, 
                     probe_fit=False,
+                    probe_support_mask=False,
                     s_position_correction=0,
                     pc_start_iteration=None,
                     pc_mode='intensity',         #'intensity' or 'object'
@@ -592,8 +624,10 @@ def LSQML_engine(iter_max, s_O, s_P,
                     l1_fft_softThreshold=0, 
                     l0_fft_hardThreshold=0, 
                     kz_regularization=0, 
+                    zblur_std=0,
                     rh_positive_phase=False, 
                     FFT_phase_offset=0,
+                    detector_mask=None,
                     ):
 
     sy, sx, dy, dx = data_4D.shape
@@ -611,6 +645,9 @@ def LSQML_engine(iter_max, s_O, s_P,
 
     if device is None:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    if detector_mask is None:
+        detector_mask = np.ones((dy, dx))
 
     print_and_log(f'Slice Thickness: {slice_thickness} Å')
     print_and_log('')
@@ -630,13 +667,15 @@ def LSQML_engine(iter_max, s_O, s_P,
     print_and_log(f'Epsilon for Real Optim: {e_g}')
     print_and_log(f'Epsilon for LSQ: {e_LSQ}')
     print_and_log(f'Probe Orthog Constraint: {probe_orthog_constr}')
+    print_and_log(f'Probe Support Mask: {probe_support_mask}')
     print_and_log(f'Sorting Probe by Energy: {sorting_probe}')
-    print_and_log(f'Phase Object Approximation: {POA}')
+    print_and_log(f'Phase Object Approximation (POA): {POA}')
     print_and_log(f'Object Positive Phase: {rh_positive_phase}')
     print_and_log(f'Object FFT LambdaTikhonov (L2): {l2_fft_lambdaTikhonov}')
     print_and_log(f'Object FFT SoftThreshold (L1): {l1_fft_softThreshold}')
     print_and_log(f'Object FFT HardThreshold (L0): {l0_fft_hardThreshold}')
     print_and_log(f'Object kz Regularization: {kz_regularization}')
+    print_and_log(f'Object zblur Std: {zblur_std} Å')
     print_and_log(f'Object FFT phase offset: {FFT_phase_offset}')
     
     wavelength = calculate_wavelength(Voltage)
@@ -659,13 +698,35 @@ def LSQML_engine(iter_max, s_O, s_P,
     pc_shift = torch.zeros(iter_max, device=device)
 
     qmy, qmx = torch.meshgrid(fftfreq(dx, device=device), fftfreq(dy, device=device), indexing='ij')
-    qy = fftfreq(Oy, device=device)
-    qx = fftfreq(Ox, device=device)
-    qz = fftfreq(n_slice, device=device)
-    qza, qya, qxa = torch.meshgrid(qz, qy, qx, indexing="ij")
-    qz2 = (qza * kz_regularization) ** 2
-    qr2 = qxa ** 2 + qya ** 2
-    Wz = 1 - 2 / torch.pi * torch.arctan2(qz2, qr2)
+
+    if kz_regularization > 0:
+        qy = fftfreq(Oy, device=device)
+        qx = fftfreq(Ox, device=device)
+        qz = fftfreq(n_slice, device=device)
+        qza, qya, qxa = torch.meshgrid(qz, qy, qx, indexing="ij")
+        qz2 = (qza * kz_regularization) ** 2
+        qr2 = qxa ** 2 + qya ** 2
+        Wz = 1 - 2 / torch.pi * torch.arctan2(qz2, qr2)
+
+    if zblur_std > 0:
+        kernel_size = 2 * int(np.ceil(5 * zblur_std / slice_thickness)) + 1
+        z = (torch.arange(kernel_size, device=device) - kernel_size // 2) * slice_thickness
+        z_kernel = torch.exp(-0.5 * (z / zblur_std)**2)
+        z_kernel /= z_kernel.sum()
+        z_kernel = z_kernel.reshape(1, 1, kernel_size).to(dtype=object_GPU.dtype)
+
+    # if zblur_std > 0:
+    #     kernel_size = 2 * int(np.ceil(5 * zblur_std)) + 1
+    #     z = torch.arange(kernel_size, device=device) - kernel_size // 2
+    #     z_kernel = torch.exp(-0.5 * (z / zblur_std)**2)
+    #     z_kernel /= z_kernel.sum()
+    #     z_kernel = z_kernel.reshape(1, 1, kernel_size).to(dtype=object_GPU.dtype)
+        
+
+    detector_mask_GPU = torch.from_numpy(detector_mask).to(device)
+
+    if probe_fit or probe_support_mask:
+        basis, apeture_mask = build_pupil_phase_basis(dy, dx, alpha, aperture_radius, device)
 
     if position_clustering:
         spatial_blocks = scan_position_clustering(posset_GPU, n_block, device=device, plot_cluster=plot_cluster)
@@ -714,12 +775,14 @@ def LSQML_engine(iter_max, s_O, s_P,
 
         for pos_block in posset_blocks:
             b_size = pos_block.shape[0]
-            poss_1D = pos_block[:, 4].to(dtype=torch.int64)
+            poss_1D = pos_block[:, 4].to(dtype=torch.int32)
             ind_y = (pos_block[:, 2][:, None, None] + y_ind[None, :, None]).to(dtype=torch.int32)#.long()
             ind_x = (pos_block[:, 3][:, None, None] + x_ind[None, None, :]).to(dtype=torch.int32)#.long()
             indice = ind_y * Ox + ind_x
             Illuminated_patches = object_GPU[:, ind_y, ind_x]
             amplitudes_patches = data_4D_sqrt_GPU[poss_1D]
+
+            amplitudes_patches *= detector_mask_GPU
 
             Prb_ms = []
             Prb_ms.append(proben_GPU.unsqueeze(1))
@@ -735,14 +798,19 @@ def LSQML_engine(iter_max, s_O, s_P,
             psi_fft = fftshift(fft2(psi, dim=(2, 3)), dim=(2, 3))
             a_psi_fft = psi_fft.abs().pow(2).sum(dim=0).sqrt()  
 
-            # Euclidean
+            # Amplitude
             chi_fft_R = amplitudes_patches / (a_psi_fft + e_f) - 1
+
+            # Anscombe
+            # chi_fft_R = (amplitudes_patches**2+0.375).sqrt() / ((a_psi_fft**2+0.375).sqrt() + e_f) - 1
 
             # Gaussian
             # chi_fft_R = amplitudes_patches.pow(2) / (a_psi_fft.pow(2) + e_f) - 1
 
             # Poisson
             # chi_fft_R = 1 - a_psi_fft.pow(2) / (amplitudes_patches.pow(2) + e_f)
+
+            chi_fft_R *= detector_mask_GPU
 
             chi_fft = psi_fft * chi_fft_R.unsqueeze(0).to(torch.complex64)
             chi = ifft2(ifftshift(chi_fft, dim=(2, 3)), dim=(2, 3))
@@ -849,26 +917,32 @@ def LSQML_engine(iter_max, s_O, s_P,
 
                 pc_shift[i] += (gy.pow(2) + gx.pow(2)).sqrt().sum()
 
-            err_u += (amplitudes_patches - (psi_fft.abs().pow(2).sum(dim=0)).sqrt()).pow(2).sum()
-            err_d += amplitudes_patches.to(torch.float32).pow(2).sum()
+            err_u += (amplitudes_patches - (psi_fft.abs().pow(2).sum(dim=0)).sqrt() * detector_mask_GPU).pow(2).sum()
+            err_d += (amplitudes_patches * detector_mask_GPU).to(torch.float32).pow(2).sum()
 
         if torch.isnan(err_u / err_d):
-            if i > 1:
-                plt.figure(figsize=(6,4))
-                plt.semilogy(range(len(err[1:i].cpu())), err[1:i].cpu())
-                plt.xlabel("Iteration")
-                plt.ylabel("Error")
-                plt.title("Convergence Curve")
-                plt.tight_layout()
+            print('')
+            print('Interrupted')
+            # if i > 1:
+            plt.figure(figsize=(6,4))
+            plt.semilogy(range(len(err[:i].cpu())), err[:i].cpu(), color='red')
+            plt.xlabel("Iteration")
+            plt.ylabel("Error")
+            plt.title("Convergence Curve at Interruption", color='red')
+            plt.tight_layout()
+            plt.show()
 
-            raise ValueError("err is NaN. Try using smaller values of s_O and s_P")
+            raise ValueError("err is NaN. Try using different values of s_O and s_P")
         
         err[i] = err_u / err_d
         posset_GPU = torch.cat(posset_blocks, dim=0)
 
         if probe_fit:
             for ns in range(n_state):
-                proben_GPU[ns] = fit_probe_with_aberration(proben_GPU[ns], wavelength, alpha, aperture_radius, device=device)["probe_fit"]
+                proben_GPU[ns] = fit_probe_with_aberration(proben_GPU[ns], wavelength, basis, apeture_mask, device=device)["probe_fit"]
+
+        if probe_support_mask:
+            proben_GPU = apply_probe_support_mask(proben_GPU, apeture_mask)
 
         if l2_fft_lambdaTikhonov > 0:
             object_GPU = l2_fft_constraint(object_GPU, n_slice, l2_fft_lambdaTikhonov)
@@ -881,6 +955,9 @@ def LSQML_engine(iter_max, s_O, s_P,
 
         if kz_regularization > 0:
             object_GPU = kz_constraint(object_GPU, Wz)
+
+        if zblur_std > 0:
+            object_GPU = zblur_constraint(object_GPU, z_kernel)
 
         if FFT_phase_offset > 0 and i > iter_max * 2 / 3:
             object_GPU = FFT_phase0_offset(object_GPU, n_slice, FFT_phase_offset)
@@ -906,10 +983,13 @@ def LSQML_engine(iter_max, s_O, s_P,
         time_remain_m = (time_remain - time_remain_h * 3600) // 60
         time_remain_s = time_remain - time_remain_h * 3600 - time_remain_m * 60
 
-        print("\rLSQ-3ML progressing: {:^3.0f}%[{}->{}] {:.2f}iter/s ({:0>2}:{:0>2}:{:0>2}<{:0>2}:{:0>2}:{:0>2})".format(process, aa, bb, speed, dur_h, dur_m, dur_s, time_remain_h, time_remain_m, time_remain_s), end="")
+        print("\rLSQML progressing: {:^3.0f}%[{}->{}] {:.2f}iter/s ({:0>2}:{:0>2}:{:0>2}<{:0>2}:{:0>2}:{:0>2})".format(process, aa, bb, speed, dur_h, dur_m, dur_s, time_remain_h, time_remain_m, time_remain_s), end="")
 
     print('')
     gpu_time = time.time() - start_time
+
+    # proben_GPU = ifft2(ifftshift(proben_GPU, dim=(1, 2)), dim=(1, 2))
+    # proben_GPU = ifft2(proben_GPU, dim=(1, 2))
 
     msLSQML_Obj = np.array(object_GPU.cpu())
     msLSQML_Prb = np.array(proben_GPU.cpu())
@@ -918,6 +998,7 @@ def LSQML_engine(iter_max, s_O, s_P,
     Obj_LSQ_step = np.array(Obj_LSQ_step.cpu())
     Prb_LSQ_step = np.array(Prb_LSQ_step.cpu())
     pc_mean_shift = np.array((pc_shift/sy/sx).cpu())
+    cbed_comparison = np.stack([amplitudes_patches[0].cpu(), a_psi_fft[0].cpu(), amplitudes_patches[-1].cpu(), a_psi_fft[-1].cpu()])
     posset = np.array(posset_GPU.cpu())
 
     log_to_file("LSQML progressing: {:^3.0f}%[{}->{}] {:.2f}iter/s ({:0>2}:{:0>2}:{:0>2}<{:0>2}:{:0>2}:{:0>2})".format(process, aa, bb, speed, dur_h, dur_m, dur_s, time_remain_h, time_remain_m, time_remain_s))
@@ -927,16 +1008,17 @@ def LSQML_engine(iter_max, s_O, s_P,
     # if 1:
         print_and_log(f'')
         print_and_log(f'################# probe fitting results ##################')
-        probe_fit_results = fit_probe_with_aberration(proben_GPU[0], wavelength, alpha, aperture_radius, device=device)
+        probe_fit_results = fit_probe_with_aberration(proben_GPU[0], wavelength, basis, apeture_mask, device=device)
         print_and_log("    Fitted Aberration:")
         for i_aberr, (symbol, name, coeff_m) in enumerate(zip(probe_fit_results["aberration_symbols"],probe_fit_results["aberration_names"],probe_fit_results["coeff_wavefront_m"])):
             print_and_log(f"    {(i_aberr):02d}. {symbol:8s} | {name:28s} = {(coeff_m).item():+.3e} A")
 
-    return msLSQML_Obj, msLSQML_Prb, Prb_EW, msLSQML_err, Obj_LSQ_step, Prb_LSQ_step, pc_mean_shift, posset
+    return msLSQML_Obj, msLSQML_Prb, Prb_EW, msLSQML_err, Obj_LSQ_step, Prb_LSQ_step, pc_mean_shift, posset, cbed_comparison
 
 
 
 
+# @torch.no_grad()
 def ePIE_engine(iter_max, s_O, s_P,
                     data_4D, Voltage, alpha, aperture_radius, 
                     posset, proben0, objectn, slice_thickness, k_theta,
@@ -945,11 +1027,12 @@ def ePIE_engine(iter_max, s_O, s_P,
                     position_clustering=False, 
                     plot_cluster = False,
                     e_f=1e-9,
-                    alpha_O=1,
-                    alpha_P=1,
+                    alpha_O=0,
+                    alpha_P=0,
                     probe_orthog_constr=False, 
                     sorting_probe=True, 
                     probe_fit=False,
+                    probe_support_mask=False,
                     s_position_correction=0,
                     pc_start_iteration=None,
                     pc_mode='intensity',         #'intensity' or 'object'
@@ -958,8 +1041,10 @@ def ePIE_engine(iter_max, s_O, s_P,
                     l1_fft_softThreshold=0, 
                     l0_fft_hardThreshold=0, 
                     kz_regularization=0, 
+                    zblur_std=0,
                     rh_positive_phase=False, 
                     FFT_phase_offset=0,
+                    detector_mask = None,
                     ):
 
     sy, sx, dy, dx = data_4D.shape
@@ -977,6 +1062,9 @@ def ePIE_engine(iter_max, s_O, s_P,
 
     if device is None:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    if detector_mask is None:
+        detector_mask = np.ones((dy, dx))
 
     print_and_log(f'Slice Thickness: {slice_thickness} Å')
     print_and_log('')
@@ -996,13 +1084,15 @@ def ePIE_engine(iter_max, s_O, s_P,
     print_and_log(f'rPIE-alpha for Object: {alpha_O }')
     print_and_log(f'rPIE-alpha for Probe: {alpha_P}')
     print_and_log(f'Probe Orthog Constraint: {probe_orthog_constr}')
+    print_and_log(f'Probe Support Mask: {probe_support_mask}')
     print_and_log(f'Sorting Probe by Energy: {sorting_probe}')
-    print_and_log(f'Phase Object Approximation: {POA}')
+    print_and_log(f'Phase Object Approximation (POA): {POA}')
     print_and_log(f'Object Positive Phase: {rh_positive_phase}')
     print_and_log(f'Object FFT LambdaTikhonov (L2): {l2_fft_lambdaTikhonov}')
     print_and_log(f'Object FFT SoftThreshold (L1): {l1_fft_softThreshold}')
     print_and_log(f'Object FFT HardThreshold (L0): {l0_fft_hardThreshold}')
     print_and_log(f'Object kz Regularization: {kz_regularization}')
+    print_and_log(f'Object zblur Std: {zblur_std} Å')
     print_and_log(f'Object FFT phase offset: {FFT_phase_offset}')
     
     wavelength = calculate_wavelength(Voltage)
@@ -1023,17 +1113,30 @@ def ePIE_engine(iter_max, s_O, s_P,
     pc_shift = torch.zeros(iter_max, device=device)
 
     qmy, qmx = torch.meshgrid(fftfreq(dx, device=device), fftfreq(dy, device=device), indexing='ij')
-    qy = fftfreq(Oy, device=device)
-    qx = fftfreq(Ox, device=device)
-    qz = fftfreq(n_slice, device=device)
-    qza, qya, qxa = torch.meshgrid(qz, qy, qx, indexing="ij")
-    qz2 = (qza * kz_regularization) ** 2
-    qr2 = qxa ** 2 + qya ** 2
-    Wz = 1 - 2 / torch.pi * torch.arctan2(qz2, qr2)
+
+    if kz_regularization > 0:
+        qy = fftfreq(Oy, device=device)
+        qx = fftfreq(Ox, device=device)
+        qz = fftfreq(n_slice, device=device)
+        qza, qya, qxa = torch.meshgrid(qz, qy, qx, indexing="ij")
+        qz2 = (qza * kz_regularization) ** 2
+        qr2 = qxa ** 2 + qya ** 2
+        Wz = 1 - 2 / torch.pi * torch.arctan2(qz2, qr2)
+
+    if zblur_std > 0:
+        kernel_size = 2 * int(np.ceil(5 * zblur_std / slice_thickness)) + 1
+        z = (torch.arange(kernel_size, device=device) - kernel_size // 2) * slice_thickness
+        z_kernel = torch.exp(-0.5 * (z / zblur_std)**2)
+        z_kernel /= z_kernel.sum()
+        z_kernel = z_kernel.reshape(1, 1, kernel_size).to(dtype=object_GPU.dtype)
+
+    detector_mask_GPU = torch.from_numpy(detector_mask).to(device)
 
     if position_clustering:
         spatial_blocks = scan_position_clustering(posset_GPU, n_block, device=device, plot_cluster=plot_cluster)
-
+    
+    if probe_fit or probe_support_mask:
+        basis, apeture_mask = build_pupil_phase_basis(dy, dx, alpha, aperture_radius, device)
 
     start_time = time.time()
     print_and_log('')
@@ -1064,7 +1167,7 @@ def ePIE_engine(iter_max, s_O, s_P,
         for pos_block in posset_blocks:
             b_size = pos_block.shape[0]
 
-            poss_1D = pos_block[:, 4].to(dtype=torch.int64)
+            poss_1D = pos_block[:, 4].to(dtype=torch.int32)
 
             ind_y = (pos_block[:, 2][:, None, None] + y_ind[None, :, None]).to(dtype=torch.int32)
             ind_x = (pos_block[:, 3][:, None, None] + x_ind[None, None, :]).to(dtype=torch.int32)
@@ -1072,6 +1175,8 @@ def ePIE_engine(iter_max, s_O, s_P,
 
             Illuminated_patches = object_GPU[:, ind_y, ind_x]
             amplitudes_patches = data_4D_sqrt_GPU[poss_1D]
+
+            amplitudes_patches *= detector_mask_GPU
 
             Prb_ms = []
             Prb_ms.append(proben_GPU.unsqueeze(1).expand(-1, b_size, -1, -1))
@@ -1087,6 +1192,7 @@ def ePIE_engine(iter_max, s_O, s_P,
             psi_fft = fftshift(fft2(psi, dim=(2, 3)), dim=(2, 3))
             a_psi_fft = psi_fft.abs().pow(2).sum(dim=0).sqrt()
             chi_fft_R = amplitudes_patches / (a_psi_fft + e_f) - 1
+            chi_fft_R *= detector_mask_GPU
             chi_fft = psi_fft * chi_fft_R.unsqueeze(0).to(torch.complex64)
             chi = ifft2(ifftshift(chi_fft, dim=(2, 3)), dim=(2, 3))
 
@@ -1098,7 +1204,7 @@ def ePIE_engine(iter_max, s_O, s_P,
 
                 P_abs2 = Prb_ms[sr][0].abs().pow(2)
                 P_max = P_abs2.amax(dim=(-2, -1), keepdim=True)
-                P_norm = (1 - alpha_O) * P_abs2 + alpha_O * P_max
+                P_norm = alpha_O * P_abs2 + (1 - alpha_O) * P_max
                 dObj_i = chi[0] * Prb_ms[sr][0].conj() / P_norm
                 dObj = torch.zeros((Oy, Ox), dtype=torch.complex64, device=device)
                 dObj = dObj.ravel().index_add_(0, indice.ravel(), dObj_i.ravel()).reshape((Oy, Ox))
@@ -1109,7 +1215,7 @@ def ePIE_engine(iter_max, s_O, s_P,
                 if sr == 0:
                     O_abs2 = Illuminated_patches[sr].abs().pow(2)
                     O_max = O_abs2.amax(dim=(-2, -1), keepdim=True)
-                    O_norm = (1 - alpha_P) * O_abs2 + alpha_P * O_max
+                    O_norm = alpha_P * O_abs2 + (1 - alpha_P) * O_max
                     dPrb_i = gPrb_i / O_norm.unsqueeze(0)
                     dPrb = dPrb_i.sum(dim=1)
                     proben_GPU += s_P * dPrb / b_size
@@ -1176,26 +1282,37 @@ def ePIE_engine(iter_max, s_O, s_P,
 
                 pc_shift[i] += (gy.pow(2) + gx.pow(2)).sqrt().sum()
 
-            err_u += (amplitudes_patches - (psi_fft.abs().pow(2).sum(dim=0)).sqrt()).pow(2).sum()
-            err_d += amplitudes_patches.to(torch.float32).pow(2).sum()
+            err_u += (amplitudes_patches - (psi_fft.abs().pow(2).sum(dim=0)).sqrt() * detector_mask_GPU).pow(2).sum()
+            err_d += (amplitudes_patches * detector_mask_GPU).to(torch.float32).pow(2).sum()
 
         if torch.isnan(err_u / err_d):
-            if i > 1:
-                plt.figure(figsize=(6,4))
-                plt.semilogy(range(len(err[1:i].cpu())), err[1:i].cpu())
-                plt.xlabel("Iteration")
-                plt.ylabel("Error")
-                plt.title("Convergence Curve")
-                plt.tight_layout()
+            print('')
+            print('Interrupted')
+            # if i > 1:
+            plt.figure(figsize=(6,4))
+            plt.semilogy(range(len(err[:i].cpu())), err[:i].cpu(), color='red')
+            plt.xlabel("Iteration")
+            plt.ylabel("Error")
+            plt.title("Convergence Curve at Interruption", color='red')
+            plt.tight_layout()
+            plt.show()
 
-            raise ValueError("err is NaN. Try using smaller values of s_O and s_P")
+            raise ValueError("err is NaN. Try using different values of s_O and s_P")
 
         err[i] = err_u / err_d
         posset_GPU = torch.cat(posset_blocks, dim=0)
 
+        # if i>0 & err[i-1]<=err[i]:
+        #     s_O *= 0.5
+        #     s_P *= 0.5
+  
+
         if probe_fit:
             for ns in range(n_state):
-                proben_GPU[ns] = fit_probe_with_aberration(proben_GPU[ns], wavelength, alpha, aperture_radius, device=device)["probe_fit"]
+                proben_GPU[ns] = fit_probe_with_aberration(proben_GPU[ns], wavelength, basis, apeture_mask, device=device)["probe_fit"]
+
+        if probe_support_mask:
+            proben_GPU = apply_probe_support_mask(proben_GPU, apeture_mask)
 
         if l2_fft_lambdaTikhonov > 0:
             object_GPU = l2_fft_constraint(object_GPU, n_slice, l2_fft_lambdaTikhonov)
@@ -1206,8 +1323,13 @@ def ePIE_engine(iter_max, s_O, s_P,
         if l0_fft_hardThreshold > 0:
             object_GPU = l0_fft_constraint(object_GPU, n_slice, l0_fft_hardThreshold)
 
-        if kz_regularization > 0:
+        if kz_regularization > 0: # & i >= 10:
+            # object_GPU = torch.nn.functional.pad(object_GPU, (0, 0, 0, 0, n_slice//2+1, n_slice//2+1), mode='constant', value=0)
+            # object_GPU = kz_constraint(object_GPU, Wz)[n_slice//2+1:n_slice//2+1+n_slice]
             object_GPU = kz_constraint(object_GPU, Wz)
+
+        if zblur_std > 0:
+            object_GPU = zblur_constraint(object_GPU, z_kernel)
             
         if FFT_phase_offset > 0 and i > iter_max * 2 / 3:
             object_GPU = FFT_phase0_offset(object_GPU, n_slice, FFT_phase_offset)
@@ -1238,12 +1360,18 @@ def ePIE_engine(iter_max, s_O, s_P,
     print('')
     gpu_time = time.time() - start_time
 
+    # proben_ape_GPU = fftshift(fft2(ifftshift(proben_GPU, dim=(1, 2)), dim=(1, 2)), dim=(1, 2))
+
+    # # proben_GPU = fftshift(ifft2(ifftshift(proben_ape_GPU, dim=(1, 2)), dim=(1, 2)), dim=(1, 2))
+    # proben_GPU = proben_ape_GPU
+
     msLSQML_Obj = np.array(object_GPU.cpu())
     msLSQML_Prb = np.array(proben_GPU.cpu())
     # Prb_EW = np.array(psi[0][0].cpu())
     Prb_EW = np.array(psi[0].mean(axis=0).cpu())
     msLSQML_err = np.array(err.cpu())
     pc_mean_shift = np.array((pc_shift/sy/sx).cpu())
+    cbed_comparison = np.stack([amplitudes_patches[0].cpu(), a_psi_fft[0].cpu(), amplitudes_patches[-1].cpu(), a_psi_fft[-1].cpu()])
     posset = np.array(posset_GPU.cpu())
 
     log_to_file("ePIE progressing: {:^3.0f}%[{}->{}] {:.2f}iter/s ({:0>2}:{:0>2}:{:0>2}<{:0>2}:{:0>2}:{:0>2})".format(process, aa, bb, speed, dur_h, dur_m, dur_s, time_remain_h, time_remain_m, time_remain_s))
@@ -1252,9 +1380,9 @@ def ePIE_engine(iter_max, s_O, s_P,
     if probe_fit:
         print_and_log(f'')
         print_and_log(f'################# probe fitting results ##################')
-        probe_fit_results = fit_probe_with_aberration(proben_GPU[0], wavelength, alpha, aperture_radius, device=device)
+        probe_fit_results = fit_probe_with_aberration(proben_GPU[0], wavelength, basis, apeture_mask, device=device)
         print_and_log("    Fitted Aberration:")
         for i_aberr, (symbol, name, coeff_m) in enumerate(zip(probe_fit_results["aberration_symbols"],probe_fit_results["aberration_names"],probe_fit_results["coeff_wavefront_m"])):
             print_and_log(f"    {(i_aberr):02d}. {symbol:8s} | {name:28s} = {(coeff_m).item():+.3e} A")
 
-    return msLSQML_Obj, msLSQML_Prb, Prb_EW, msLSQML_err, pc_mean_shift, posset
+    return msLSQML_Obj, msLSQML_Prb, Prb_EW, msLSQML_err, pc_mean_shift, posset, cbed_comparison

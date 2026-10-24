@@ -20,6 +20,7 @@ def tcBF(data_4D,
         defocus,
         inner_radius = 0, 
         outer_radius = 1,
+        contrast_reverse = False,
         BF_padding = 30,
 ):
     print_and_log('')
@@ -100,6 +101,9 @@ def tcBF(data_4D,
 
     shift_max = int(np.abs(outer_radius*alpha*defocus/scan_step)+1)
     intensity_min = np.min(Aligned_BF[shift_max:-shift_max,shift_max:-shift_max])
+
+    if contrast_reverse:
+        Aligned_BF *= -1
 
     return Aligned_BF, intensity_min
 
