@@ -33,8 +33,8 @@ pip install -r requirements.txt
 ```
 
 ## Tested Environment
-- Python            3.11
 - CUDA              12.4 / Apple MPS
+- Python            3.11
 - PyTorch           2.1.1
 - NumPy             1.26.4
 - Matplotlib        3.10.3
