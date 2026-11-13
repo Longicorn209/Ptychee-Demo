@@ -629,6 +629,13 @@ def LSQML_engine(iter_max, s_O, s_P,
                     FFT_phase_offset=0,
                     detector_mask=None,
                     ):
+    if device is None:
+        if torch.cuda.is_available():
+            device = torch.device("cuda:0")
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            device = torch.device("mps")
+        else:
+            device = torch.device("cpu")
 
     sy, sx, dy, dx = data_4D.shape
     n_state = proben0.shape[0]
@@ -642,9 +649,6 @@ def LSQML_engine(iter_max, s_O, s_P,
 
     if pc_start_iteration is None:
         pc_start_iteration = 0.25*iter_max
-
-    if device is None:
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     if detector_mask is None:
         detector_mask = np.ones((dy, dx))
@@ -682,11 +686,11 @@ def LSQML_engine(iter_max, s_O, s_P,
     propagators = np.fft.fftshift(np.exp(-1j*2*np.pi/wavelength*0.5*slice_thickness*k_theta**2))
 
     data_4D[data_4D < 0] = 0
-    data_4D_sqrt_GPU = torch.from_numpy(np.reshape(np.sqrt(data_4D), (N_pos, dy, dx))).to(device)
-    proben_GPU = torch.from_numpy(proben0).to(device).to(dtype=torch.complex64)
-    object_GPU = torch.from_numpy(objectn).to(device).to(dtype=torch.complex64)
-    posset_GPU = torch.from_numpy(posset).to(device)
-    propagators_GPU = torch.from_numpy(propagators).to(device).to(dtype=torch.complex64)
+    data_4D_sqrt_GPU = torch.from_numpy(np.reshape(np.sqrt(data_4D, dtype=np.float32), (N_pos, dy, dx))).to(device)
+    proben_GPU = torch.from_numpy(proben0.astype(np.complex64)).to(device)
+    object_GPU = torch.from_numpy(objectn.astype(np.complex64)).to(device)
+    posset_GPU = torch.from_numpy(posset.astype(np.float32)).to(device)
+    propagators_GPU = torch.from_numpy(propagators.astype(np.complex64)).to(device)
 
     _, Oy, Ox = object_GPU.shape
     y_ind = torch.arange(dy, device=device, dtype=torch.int32)
@@ -1047,6 +1051,14 @@ def ePIE_engine(iter_max, s_O, s_P,
                     detector_mask = None,
                     ):
 
+    if device is None:
+        if torch.cuda.is_available():
+            device = torch.device("cuda:0")
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            device = torch.device("mps")
+        else:
+            device = torch.device("cpu")
+
     sy, sx, dy, dx = data_4D.shape
     n_state = proben0.shape[0]
     n_slice = objectn.shape[0]
@@ -1059,9 +1071,6 @@ def ePIE_engine(iter_max, s_O, s_P,
 
     if pc_start_iteration is None:
         pc_start_iteration = 0.25*iter_max
-
-    if device is None:
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     if detector_mask is None:
         detector_mask = np.ones((dy, dx))
@@ -1099,11 +1108,11 @@ def ePIE_engine(iter_max, s_O, s_P,
     propagators = np.fft.fftshift(np.exp(-1j*2*np.pi/wavelength*0.5*slice_thickness*k_theta**2))
 
     data_4D[data_4D < 0] = 0
-    data_4D_sqrt_GPU = torch.from_numpy(np.reshape(np.sqrt(data_4D), (N_pos, dy, dx))).to(device)
-    proben_GPU = torch.from_numpy(proben0).to(device).to(dtype=torch.complex64)
-    object_GPU = torch.from_numpy(objectn).to(device).to(dtype=torch.complex64)
-    posset_GPU = torch.from_numpy(posset).to(device)
-    propagators_GPU = torch.from_numpy(propagators).to(device).to(dtype=torch.complex64)
+    data_4D_sqrt_GPU = torch.from_numpy(np.reshape(np.sqrt(data_4D, dtype=np.float32), (N_pos, dy, dx))).to(device)
+    proben_GPU = torch.from_numpy(proben0.astype(np.complex64)).to(device)
+    object_GPU = torch.from_numpy(objectn.astype(np.complex64)).to(device)
+    posset_GPU = torch.from_numpy(posset.astype(np.float32)).to(device)
+    propagators_GPU = torch.from_numpy(propagators.astype(np.complex64)).to(device)
 
     _, Oy, Ox = object_GPU.shape
     y_ind = torch.arange(dy, device=device, dtype=torch.int32)
