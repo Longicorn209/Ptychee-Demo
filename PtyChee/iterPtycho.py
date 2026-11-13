@@ -727,7 +727,7 @@ def LSQML_engine(iter_max, s_O, s_P,
     #     z_kernel = z_kernel.reshape(1, 1, kernel_size).to(dtype=object_GPU.dtype)
         
 
-    detector_mask_GPU = torch.from_numpy(detector_mask).to(device)
+    detector_mask_GPU = torch.from_numpy(detector_mask.astype(np.float32)).to(device)
 
     if probe_fit or probe_support_mask:
         basis, apeture_mask = build_pupil_phase_basis(dy, dx, alpha, aperture_radius, device)
@@ -748,7 +748,7 @@ def LSQML_engine(iter_max, s_O, s_P,
 
         # if i == iter_max//2:
         #     s_P = 0
-        #     object_GPU = torch.from_numpy(objectn).to(device).to(dtype=torch.complex64)
+        #     object_GPU = torch.from_numpy(objectn.astype(np.complex64)).to(device).to(dtype=torch.complex64)
 
         if position_clustering:
             block_order = torch.randperm(n_block).tolist()
@@ -1139,7 +1139,7 @@ def ePIE_engine(iter_max, s_O, s_P,
         z_kernel /= z_kernel.sum()
         z_kernel = z_kernel.reshape(1, 1, kernel_size).to(dtype=object_GPU.dtype)
 
-    detector_mask_GPU = torch.from_numpy(detector_mask).to(device)
+    detector_mask_GPU = torch.from_numpy(detector_mask.astype(np.float32)).to(device)
 
     if position_clustering:
         spatial_blocks = scan_position_clustering(posset_GPU, n_block, device=device, plot_cluster=plot_cluster)
